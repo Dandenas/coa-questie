@@ -76,6 +76,11 @@ function QuestieFramePool:GetFrame()
     else
         --Questie:Debug(Questie.DEBUG_SPAM, "[QuestieFramePool:GetFrame] Reusing frame")
         unusedFrames[returnFrame.frameId] = nil
+        -- CoA fix: the unload functions clear _G[name] (#9), but GetFramesForQuest finds a quest's
+        -- pins through _G[name]. A recycled frame without its global could never be unloaded again,
+        -- so completed objectives / turned-in '?' markers stayed on the map until /reload.
+        local name = returnFrame:GetName()
+        if name then _G[name] = returnFrame end
     end
     if returnFrame ~= nil and returnFrame.hidden and returnFrame._show ~= nil and returnFrame._hide ~= nil then -- restore state to normal (toggle questie)
         returnFrame.hidden = false

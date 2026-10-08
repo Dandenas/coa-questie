@@ -29,6 +29,7 @@ If you also use Zygor or TomTom, turn off one of the quest arrows so they don't 
   - `Questie-X-AscensionDB\AscensionLoader.lua`
   - `Questie-X-AscensionDB\Zones\AscensionUiMapData.lua`
   - `Questie-X-AscensionDB\Zones\AscensionZoneTables.lua`
+- **Stale map pins fixed (affects all servers, not just CoA).** After an objective completed or a quest was turned in, its marker or "?" sometimes stayed on the map/minimap until `/reload`. Questie recycles pin frames and finds a quest's pins by their global frame name. Its unload functions clear that name, but a recycled frame never got it back, so it could no longer be removed. The frame pool now restores the name when it reuses a frame (`Questie-X\Modules\FramePool\QuestieFramePool.lua`). Thanks to Yarnaros for the report.
 - **CoA caves and sub-zones.** `Questie-X-AscensionDB\Zones\CoAExtraZones.lua` adds map sizes for 26 CoA open-world maps the plugin doesn't know (Jangolode Mine, Gold Coast Quarry, Stillpine Hold, Dustwind Cave, Dun Kazad, …), taken from the client's `WorldMapArea.dbc`, so pins and the arrow work inside them.
 - **CoA quests (`Questie-X-CoADB`).** Generated from a CoA server's world database (the [CoA AzerothCore repo](https://github.com/jealous-sound/azerothcore-wotlk-coa), core `8b1f3a0c`, 2026-10-08). It contains only what differs from Questie's stock data:
   - **325 new quests** (CoA's own), with givers, turn-ins, objectives, item drops and exploration spots;
