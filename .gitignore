@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+*.json.gz
+stock_index.tsv

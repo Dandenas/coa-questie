@@ -1,0 +1,44 @@
+## Interface: 30300
+## Interface-MoP: 50400
+## Interface-Classic: 11503
+## Interface-BCC: 20504
+## Interface-Wrath: 30403
+## Interface-Cata: 40400
+## Interface-Retail: 110002
+## Title: |cFF5EBAF3Questie|r|cFFDAFAFD-X|r |cFF00FF00WotLK Database|r
+## Notes: Quest, NPC, Object and Item database for WotLK 3.3.5
+## Author: Questie Team
+## Version: 1.4.8
+## Dependencies: Questie-X
+## X-DB-Flavor: WotLKDB
+
+# Raw data tables (split into chunks for WoW 3.3.5 file size compatibility)
+Database\Wotlk\Split\wotlkQuestDB_1.lua
+Database\Wotlk\Split\wotlkNpcDB_1.lua
+Database\Wotlk\Split\wotlkNpcDB_2.lua
+Database\Wotlk\Split\wotlkObjectDB_1.lua
+Database\Wotlk\Split\wotlkItemDB_1.lua
+Database\Wotlk\Split\wotlkItemDB_2.lua
+Database\Wotlk\Split\wotlkItemDB_3.lua
+
+# XP data
+Database\QuestXP\xpDB-wotlk.lua
+
+# Expansion corrections (includes TBC baseline)
+Database\Corrections\tbcQuestFixes.lua
+Database\Corrections\tbcNPCFixes.lua
+Database\Corrections\tbcItemFixes.lua
+Database\Corrections\tbcObjectFixes.lua
+Database\Corrections\wotlkQuestFixes.lua
+Database\Corrections\wotlkNPCFixes.lua
+Database\Corrections\wotlkItemFixes.lua
+Database\Corrections\wotlkObjectFixes.lua
+
+# Localization lookups
+Localization\lookups\Wotlk\lookupItems\lookupItems.xml
+Localization\lookups\Wotlk\lookupNpcs\lookupNpcs.xml
+Localization\lookups\Wotlk\lookupObjects\lookupObjects.xml
+Localization\lookups\Wotlk\lookupQuests\lookupQuests.xml
+
+# Plugin loader (must be last)
+Loader.lua

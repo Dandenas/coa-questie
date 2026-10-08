@@ -1,0 +1,16 @@
+## Interface: 30300
+## Title: Questie-X |cFF00FF00[CoADB]|r
+## Notes: Conquest of Azeroth quest data for Questie-X, generated from the CoA server's world database
+## Author: CoA addons
+## Version: 2026.10.08
+## RequiredDeps: Questie-X
+## OptionalDeps: Questie-X-WotLKDB, Questie-X-AscensionDB
+## X-Questie-Plugin-Name: CoA
+## X-CoA-Core: 8b1f3a0c
+
+CoALoader.lua
+
+Data\CoAQuestDB_1.lua
+Data\CoANpcDB_1.lua
+Data\CoAObjectDB_1.lua
+Data\CoAItemDB_1.lua

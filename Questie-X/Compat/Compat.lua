@@ -1,0 +1,2169 @@
+---@type QuestieLib
+local QuestieLib = QuestieLoader:ImportModule("QuestieLib")
+---@type QuestieStream
+local QuestieStream = QuestieLoader:ImportModule("QuestieStreamLib")
+---@type QuestieDB
+local QuestieDB = QuestieLoader:ImportModule("QuestieDB")
+---@type QuestieOptions
+local QuestieOptions = QuestieLoader:ImportModule("QuestieOptions")
+---@type QuestieEventHandler
+local QuestieEventHandler = QuestieLoader:ImportModule("QuestieEventHandler")
+---@type QuestieQuest
+local QuestieQuest = QuestieLoader:ImportModule("QuestieQuest")
+---@type QuestEventHandler
+local QuestEventHandler = QuestieLoader:ImportModule("QuestEventHandler")
+---@class AvailableQuests
+local AvailableQuests = QuestieLoader:ImportModule("AvailableQuests")
+---@type ZoneDB
+local ZoneDB = QuestieLoader:ImportModule("ZoneDB")
+---@type MinimapIcon
+local MinimapIcon = QuestieLoader:ImportModule("MinimapIcon")
+---@type TrackerLinePool
+local TrackerLinePool = QuestieLoader:ImportModule("TrackerLinePool")
+---@type QuestiePlayer
+local QuestiePlayer = QuestieLoader:ImportModule("QuestiePlayer")
+---@type QuestXP
+local QuestXP = QuestieLoader:ImportModule("QuestXP")
+---@class QuestieCoords
+local QuestieCoords = QuestieLoader:ImportModule("QuestieCoords")
+---@class Sounds
+local Sounds = QuestieLoader:ImportModule("Sounds")
+---@class QuestieMenu
+local QuestieMenu = QuestieLoader:ImportModule("QuestieMenu")
+---@class QuestieTooltips
+local QuestieTooltips = QuestieLoader:ImportModule("QuestieTooltips")
+---@class QuestieNameplate
+local QuestieNameplate = QuestieLoader:ImportModule("QuestieNameplate")
+---@type QuestieCorrections
+local QuestieCorrections = QuestieLoader:ImportModule("QuestieCorrections")
+
+-- addon/folder name
+QuestieCompat.addonName = QuestieLoader.addonName or "Questie"
+
+-- polyfill hooksecurefunc for 1.12
+if not hooksecurefunc then
+    hooksecurefunc = function(t, k, f)
+        if type(t) == "string" then
+            f = k
+            k = t
+            t = _G
+        end
+        local old = t[k]
+        if old then
+            t[k] = function(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20,
+                            a21, a22, a23, a24, a25)
+                local r1, r2, r3, r4, r5, r6, r7, r8, r9, r10 = old(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12,
+                    a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25)
+                f(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22,
+                    a23, a24, a25)
+                return r1, r2, r3, r4, r5, r6, r7, r8, r9, r10
+            end
+        else
+        end
+    end
+end
+
+-- polyfill math.mod for 3.3.5 / Retail (Lua 5.1+)
+if not math.mod then
+    math.mod = math.fmod or function(a, b)
+        return a - math.floor(a/b)*b
+    end
+end
+
+QuestieCompat.NOOP = function() end
+QuestieCompat.NOOP_MT = { __index = function() return QuestieCompat.NOOP end }
+
+-- events handler
+QuestieCompat.frame = CreateFrame("Frame")
+QuestieCompat.frame:RegisterEvent("ADDON_LOADED")
+QuestieCompat.frame:RegisterEvent("PLAYER_LOGIN")
+QuestieCompat.frame:RegisterEvent("PLAYER_LOGOUT")
+QuestieCompat.frame:SetScript("OnEvent",
+    function(self, event, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21,
+             a22, a23, a24, a25)
+        QuestieCompat[event](self, event, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18,
+            a19, a20, a21, a22, a23, a24, a25)
+    end)
+
+-- current expansion level (https://wowpedia.fandom.com/wiki/WOW_PROJECT_ID)
+QuestieCompat.WOW_PROJECT_CLASSIC = 2
+QuestieCompat.WOW_PROJECT_BURNING_CRUSADE_CLASSIC = 5
+QuestieCompat.WOW_PROJECT_WRATH_CLASSIC = 11
+QuestieCompat.WOW_PROJECT_ID = tonumber(GetAddOnMetadata(QuestieCompat.addonName, "X-WOW_PROJECT_ID"))
+
+-- check for a specific type of group
+QuestieCompat.LE_PARTY_CATEGORY_HOME = 1     -- home-realm parties
+QuestieCompat.LE_PARTY_CATEGORY_INSTANCE = 2 -- instance-specific groups
+
+-- Date stuff
+QuestieCompat.CALENDAR_WEEKDAY_NAMES = {
+    WEEKDAY_SUNDAY,
+    WEEKDAY_MONDAY,
+    WEEKDAY_TUESDAY,
+    WEEKDAY_WEDNESDAY,
+    WEEKDAY_THURSDAY,
+    WEEKDAY_FRIDAY,
+    WEEKDAY_SATURDAY,
+};
+
+-- month names show up differently for full date displays in some languages
+QuestieCompat.CALENDAR_FULLDATE_MONTH_NAMES = {
+    FULLDATE_MONTH_JANUARY,
+    FULLDATE_MONTH_FEBRUARY,
+    FULLDATE_MONTH_MARCH,
+    FULLDATE_MONTH_APRIL,
+    FULLDATE_MONTH_MAY,
+    FULLDATE_MONTH_JUNE,
+    FULLDATE_MONTH_JULY,
+    FULLDATE_MONTH_AUGUST,
+    FULLDATE_MONTH_SEPTEMBER,
+    FULLDATE_MONTH_OCTOBER,
+    FULLDATE_MONTH_NOVEMBER,
+    FULLDATE_MONTH_DECEMBER,
+};
+
+-- https://wago.tools/db2/ChrRaces?build=3.4.3.52237
+QuestieCompat.ChrRaces = {
+    Human = 1,
+    Orc = 2,
+    Dwarf = 3,
+    NightElf = 4,
+    Scourge = 5,
+    Tauren = 6,
+    Gnome = 7,
+    Troll = 8,
+    Goblin = 9,
+    BloodElf = 10,
+    Draenei = 11,
+    FelOrc = 12,
+    Naga_ = 13,
+    Broken = 14,
+    Skeleton = 15,
+    Vrykul = 16,
+    Tuskarr = 17,
+    ForestTroll = 18,
+    Taunka = 19,
+    NorthrendSkeleton = 20,
+    IceTroll = 21,
+}
+
+-- https://wago.tools/db2/ChrClasses?build=3.4.3.52237
+QuestieCompat.ChrClasses = {
+    WARRIOR = 1,
+    PALADIN = 2,
+    HUNTER = 3,
+    ROGUE = 4,
+    PRIEST = 5,
+    DEATHKNIGHT = 6,
+    SHAMAN = 7,
+    MAGE = 8,
+    WARLOCK = 9,
+    DRUID = 11,
+}
+
+local activeTimers = {}
+local inactiveTimers = {}
+
+local function timerCancel(id)
+    local timer = activeTimers[id]
+    if not timer then return end
+
+    timer:GetParent():Stop()
+
+    timer.id = nil
+    activeTimers[id] = nil
+    inactiveTimers[timer] = true
+end
+
+local function timerOnFinished(self)
+    local id = self.id
+    self.callback(id)
+
+    -- Make sure timer wasn't cancelled during the callback and used again
+    if id == self.id then
+        if self.iterations > 0 then
+            self.iterations = self.iterations - 1
+            if self.iterations == 0 then
+                timerCancel(id)
+            end
+        end
+    end
+end
+
+if not QuestieCompat.C_Timer then
+    QuestieCompat.C_Timer = {
+    -- Schedules a (repeating) timer that can be canceled. (https://wowpedia.fandom.com/wiki/API_C_Timer.NewTimer)
+    NewTicker = function(duration, callback, iterations)
+        local timer = next(inactiveTimers)
+        if timer then
+            inactiveTimers[timer] = nil
+        else
+            local anim = QuestieCompat.frame:CreateAnimationGroup()
+            timer = anim:CreateAnimation()
+            timer:SetScript("OnFinished", timerOnFinished)
+        end
+
+        if duration < 0.01 then duration = 0.01 end
+        timer:SetDuration(duration)
+
+        timer.callback = callback
+        timer.iterations = iterations or -1
+        timer.id = { Cancel = timerCancel }
+        activeTimers[timer.id] = timer
+
+        local anim = timer:GetParent()
+        anim:SetLooping("REPEAT")
+        anim:Play()
+
+        return timer.id
+    end,
+    -- Schedules a timer. (https://wowpedia.fandom.com/wiki/API_C_Timer.After)
+    After = function(duration, callback)
+        return QuestieCompat.C_Timer.NewTicker(duration, callback, 1)
+    end
+}
+end
+
+local mapIdToUiMapId = {}
+-- convert current mapAreaID and mapLevel to UiMapId
+-- https://wowpedia.fandom.com/wiki/API_GetCurrentMapAreaID
+-- https://wowwiki-archive.fandom.com/wiki/API_GetCurrentMapDungeonLevel
+-- https://wowpedia.fandom.com/wiki/UiMapIDtable.getn(Classic)
+function QuestieCompat.GetCurrentUiMapID()
+    local mapID = GetCurrentMapAreaID()
+    if mapID == 0 then -- both the "Cosmic" and "Azeroth" maps return a mapID of 0
+        mapID = GetCurrentMapContinent()
+    end
+    local uiMapId = mapIdToUiMapId[mapID + GetCurrentMapDungeonLevel() / 10]
+    if uiMapId then
+        return uiMapId
+    end
+    if QuestieCompat.UiMapData and QuestieCompat.UiMapData[mapID] then
+        return mapID
+    end
+    -- Sunstrider safety net:
+    -- On Ascension, the client can land on the Sunstrider map while the classic
+    -- map lookup chain still falls through. Returning 946 here routes pins and
+    -- learner updates through the ghost-map path, which breaks redraws and can
+    -- keep objective pins stuck in the wrong place. Prefer the real Sunstrider
+    -- child map when we know the player is on that realm/zone.
+    if (_G.IsAscensionServer or _G.C_CharacterAdvancement) and (GetRealZoneText and GetRealZoneText() == "Sunstrider Isle") then
+        return 1241
+    end
+    -- Non-Sunstrider fallback: preserve the legacy ghost-map behavior only when
+    -- we are not on the Ascension Sunstrider starting zone.
+    return 946
+end
+
+-- maps mapAreaID to Zone and Continent index
+-- https://wowpedia.fandom.com/wiki/API_GetMapContinents
+-- https://wowpedia.fandom.com/wiki/API_GetMapZones
+local mapIdToCZ = {}
+local continents = { GetMapContinents() }
+for C=1, #continents do
+    local zones = { GetMapZones(C) }
+    for Z=1, #zones do
+        SetMapZoom(C, Z)
+        local mapId = GetCurrentMapAreaID()
+        mapIdToCZ[mapId] = Z + C / 10
+    end
+end
+
+function QuestieCompat.TomTom_AddWaypoint(title, zone, x, y)
+    local CZ = mapIdToCZ[QuestieCompat.UiMapData[zone].mapID]
+    return TomTom:AddZWaypoint(QuestieCompat.Round(math.mod(CZ, 1) * 10), math.floor(CZ), x, y, title)
+end
+
+-- This function will do its utmost to retrieve some sort of valid position
+-- for the player, including changing the current map zoom (if needed)
+-- https://wowpedia.fandom.com/wiki/API_C_Map.GetPlayerMapPosition?oldid=2167175
+function QuestieCompat.GetCurrentPlayerPosition()
+    local debugPins = _G.QuestieDebugPlayerPosition
+    local visibleWorldMap = WorldMapFrame:IsVisible()
+    if not WorldMapFrame:IsVisible() then
+        SetMapToCurrentZone();
+    end
+    local x, y = GetPlayerMapPosition("player");
+    if (x <= 0 and y <= 0) then
+        if (WorldMapFrame:IsVisible()) then
+            -- we know there is a visible world map, so don't cause
+            -- WORLD_MAP_UPDATE events by changing map zoom
+            return QuestieCompat.GetCurrentUiMapID(), x, y;
+        end
+        SetMapToCurrentZone();
+        x, y = GetPlayerMapPosition("player");
+        if (x <= 0 and y <= 0) then
+            -- attempt to zoom out once - logic copied from WorldMapZoomOutButton_OnClick()
+            if (ZoomOut()) then
+                -- do nothing
+            elseif (GetCurrentMapZone() ~= WORLDMAP_WORLD_ID) then
+                SetMapZoom(GetCurrentMapContinent());
+            else
+                SetMapZoom(WORLDMAP_WORLD_ID);
+            end
+            x, y = GetPlayerMapPosition("player");
+            if (x <= 0 and y <= 0) then
+                -- we are in an instance without a map or otherwise off map
+                return QuestieCompat.GetCurrentUiMapID(), x, y;
+            end
+        end
+    end
+    -- Detect coordinate-space mismatch: on subzones like Sunstrider Isle, SetMapToCurrentZone()
+    -- sets the displayed map to the parent zone (Eversong Woods), so GetPlayerMapPosition returns
+    -- parent-zone-relative 0-1 coords. GetCurrentUiMapID() returns the correct child-zone uiMapId
+    -- via the safety net. Convert the parent-zone coords to child-zone coords via world space.
+    local wantedUiMapId = QuestieCompat.GetCurrentUiMapID()
+    local actualMapAreaId = GetCurrentMapAreaID and GetCurrentMapAreaID()
+    if actualMapAreaId then
+        local actualUiMapId = mapIdToUiMapId[actualMapAreaId + (GetCurrentMapDungeonLevel and GetCurrentMapDungeonLevel() / 10 or 0)]
+        if debugPins then
+            print(string.format(
+                "[QD] PlayerPositionSource visibleMap=%s rawMapAreaID=%s dungeonLvl=%s actualUi=%s wantedUi=%s raw=(%s,%s) realZone=%s mapName=%s",
+                tostring(visibleWorldMap),
+                tostring(actualMapAreaId),
+                tostring(GetCurrentMapDungeonLevel and GetCurrentMapDungeonLevel() or nil),
+                tostring(actualUiMapId),
+                tostring(wantedUiMapId),
+                tostring(x),
+                tostring(y),
+                tostring(GetRealZoneText and GetRealZoneText() or nil),
+                tostring(GetMapInfo and GetMapInfo() or nil)
+            ))
+        end
+        if actualUiMapId and actualUiMapId ~= wantedUiMapId and QuestieCompat.HBD then
+            local worldX, worldY = QuestieCompat.HBD:GetWorldCoordinatesFromZone(x, y, actualUiMapId)
+            if debugPins then
+                print(string.format(
+                    "[QD] CONV raw=(%.6f,%.6f) actualUi=%s→world=(%s,%s)",
+                    x, y, tostring(actualUiMapId), tostring(worldX), tostring(worldY)))
+            end
+            if worldX and worldY then
+                local cx, cy = QuestieCompat.HBD:GetZoneCoordinatesFromWorld(worldX, worldY, wantedUiMapId, true)
+                if cx and cy then
+                    if debugPins then
+                        print(string.format(
+                            "[QD] CONV2 world=(%s,%s) wantedUi=%s→zone=(%.6f,%.6f)",
+                            tostring(worldX), tostring(worldY), tostring(wantedUiMapId), cx, cy))
+                    end
+                    return wantedUiMapId, cx, cy
+                end
+            end
+        end
+    end
+    return wantedUiMapId, x, y;
+end
+
+-- wrapper used by QuestieCoords
+local playerPos = {}
+function QuestieCompat.GetPlayerMapPosition()
+    playerPos.uiMapID, playerPos.x, playerPos.y = QuestieCompat.GetCurrentPlayerPosition()
+    return playerPos, playerPos.uiMapID
+end
+
+QuestieCompat.C_Map = {
+    GetPlayerMapPosition = function(uiMapID, unitToken)
+        return QuestieCompat.GetPlayerMapPosition()
+    end,
+    -- Returns map information.
+    -- https://wowpedia.fandom.com/wiki/API_C_Map.GetMapInfo
+    GetMapInfo = function(uiMapID)
+        if QuestieCompat.UiMapData[uiMapID] then
+            return QuestieCompat.UiMapData[uiMapID]
+        end
+    end,
+    -- Returns a map subzone name.
+    -- https://wowpedia.fandom.com/wiki/API_C_Map.GetAreaInfo
+    GetAreaInfo = function(areaID)
+        return
+    end,
+    -- Returns the current UI map for the given unit.
+    -- https://wowpedia.fandom.com/wiki/API_C_Map.GetBestMapForUnit
+    GetBestMapForUnit = function(unit)
+        if unit == "player" then
+            return QuestieCompat.GetCurrentPlayerPosition()
+        end
+    end,
+    -- Translates a map position to a world map position.
+    -- https://wowpedia.fandom.com/wiki/API_C_Map.GetWorldPosFromMapPos
+    GetWorldPosFromMapPos = function(uiMapID, mapPos)
+        local x, y, instanceID = QuestieCompat.HBD:GetWorldCoordinatesFromZone(mapPos.x, mapPos.y, uiMapID)
+        return instanceID or 0, { x = x or 0, y = y or 0 }
+    end,
+    -- Stub for GetMapChildrenInfo to prevent crashes on unsupported clients
+    GetMapChildrenInfo = function(mapID, mapType, allDescendants)
+        return {}
+    end,
+}
+
+-- https://www.townlong-yak.com/framexml/classic/Blizzard_MapCanvas/Blizzard_MapCanvas.lua
+QuestieCompat.WorldMapFrame = {
+    IsVisible = function(self)
+        return WorldMapFrame:IsVisible()
+    end,
+    IsShown = function(self)
+        return WorldMapFrame:IsShown()
+    end,
+    Show = function(self)
+        ShowUIPanel(WorldMapFrame)
+    end,
+    GetCanvas = function(self)
+        return WorldMapDetailFrame or WorldMapButton or WorldMapFrame
+    end,
+    GetMapID = QuestieCompat.GetCurrentUiMapID,
+    SetMapID = function(self, UiMapID)
+        local mapID = QuestieCompat.UiMapData[UiMapID].mapID
+        local mapLevel = QuestieCompat.Round(math.mod(mapID, 1) * 10)
+
+        SetMapByID(math.floor(mapID) - 1)
+        if mapLevel > 0 then
+            SetDungeonMapLevel(mapLevel)
+        end
+    end,
+    EnumeratePinsByTemplate = function(self, template)
+        return next, QuestieCompat.HBDPins.worldmapPins
+    end,
+}
+
+QuestieCompat.C_Calendar = {
+    -- Returns information about the calendar month by offset.
+    -- https://wowpedia.fandom.com/wiki/API_C_Calendar.GetMonthInfo
+    GetMonthInfo = function(offsetMonths)
+        local month, year, numdays, firstday = CalendarGetMonth(offsetMonth);
+        return {
+            month = month,
+            year = year,
+            numDays = numdays,
+            firstWeekday = firstday,
+        }
+    end,
+}
+
+QuestieCompat.C_DateAndTime = {
+    -- Returns the realm's current date and time.
+    -- https://wowpedia.fandom.com/wiki/API_C_DateAndTime.GetCurrentCalendarTime
+    GetCurrentCalendarTime = function()
+        local weekday, month, day, year = CalendarGetDate();
+        local hours, minutes = GetGameTime()
+        return {
+            year = year,
+            month = month,
+            monthDay = day,
+            weekday = weekday,
+            hour = hours,
+            minute = minutes
+        }
+    end
+}
+
+-- Returns the server's Unix time.
+-- https://wowpedia.fandom.com/wiki/API_GetServerTime
+function QuestieCompat.GetServerTime()
+    local weekday, month, day, year = CalendarGetDate()
+    local hours, minutes = GetGameTime()
+
+    local currentDate = {
+        year = year,
+        month = month,
+        day = day,
+        weekday = weekday,
+        hour = hours,
+        min = minutes,
+    }
+
+    return time(currentDate), currentDate
+end
+
+local questObjectivesCache = {}
+
+local function parseQuestObjective(text)
+    local name, fulfilled, required = string.match(string.gsub(text, "\239\188\154", ":"), "(.*):%s*([%d]+)%s*/%s*([%d]+)")
+    if not name then
+
+    end
+    return name, fulfilled, required
+end
+
+
+if not rawget(QuestieCompat, "C_QuestLog") then
+    QuestieCompat.C_QuestLog = {}
+end
+local cLog = QuestieCompat.C_QuestLog
+
+cLog.GetQuestObjectives = function(questID, questLogIndex)
+
+        local questObjectives = {}
+        if questLogIndex then
+            local numObjectives = GetNumQuestLeaderBoards(questLogIndex)
+            for i = 1, numObjectives do
+                local description, objectiveType, isCompleted = GetQuestLogLeaderBoard(i, questLogIndex)
+                if objectiveType ~= "log" and description then
+                    local objectiveName, numFulfilled, numRequired = parseQuestObjective(description)
+                    if objectiveName then
+                        local fulfilled = questObjectivesCache[objectiveName]
+                        if fulfilled then
+                            numFulfilled = fulfilled
+                            questObjectivesCache[objectiveName] = nil
+                        end
+                    end
+
+
+                    table.insert(questObjectives, {
+                        text = description,
+                        type = objectiveType,
+                        finished = isCompleted and true or false,
+                        numFulfilled = tonumber(numFulfilled) or (isCompleted and 1 or 0),
+                        numRequired = tonumber(numRequired) or 1,
+                    })
+                end
+            end
+        end
+        return questObjectives
+    end
+    
+    cLog.GetMaxNumQuestsCanAccept = function()
+        return MAX_QUESTLOG_QUESTS
+    end
+    
+    cLog.IsOnQuest = function(questId)
+        return QuestieCompat.GetQuestLogIndexByID(questId) ~= nil
+    end
+
+
+
+-- Can't find anything about this function.
+-- Apparently, it returns true when quest data is ready to be queried.
+function QuestieCompat.HaveQuestData(questID)
+    return true
+end
+
+-- https://wowpedia.fandom.com/wiki/API_GetQuestLogTitle?oldid=2214753
+-- Returns information about a quest in your quest log.
+-- Patch 6.0.2 (2014-10-14): Removed returns 'questTag'.
+function QuestieCompat.GetQuestLogTitle(questLogIndex)
+    local numReturns = select("#", GetQuestLogTitle(questLogIndex))
+    if numReturns == 0 then return nil end
+
+    local ret = { GetQuestLogTitle(questLogIndex) }
+
+    local questTitle = ret[1]
+    local level = ret[2]
+    local questTag = ret[3]
+
+    local isHeader = ret[numReturns - 4]
+    local isCollapsed = ret[numReturns - 3]
+    local isComplete = ret[numReturns - 2]
+    local isDaily = ret[numReturns - 1]
+    local questID = ret[numReturns]
+
+    if (isComplete == nil and not isHeader) then
+        local numObjectives = GetNumQuestLeaderBoards(questLogIndex)
+        local requiredMoney = GetQuestLogRequiredMoney(questLogIndex)
+        isComplete = (numObjectives == 0 and GetMoney() >= requiredMoney) and 1 or nil
+    end
+
+    return questTitle, level, questTag, isHeader, isCollapsed, isComplete, isDaily and 2 or 1, questID
+end
+
+local MAX_QUEST_LOG_INDEX = 75
+-- Returns the current quest log index of a quest by its ID.
+-- https://wowpedia.fandom.com/wiki/API_GetQuestLogIndexByID
+function QuestieCompat.GetQuestLogIndexByID(questId)
+    local numEntries = select(1, GetNumQuestLogEntries()) or 0
+    for i = 1, numEntries do
+        local title, level, questTag, suggestedGroup, isHeader, isCollapsed, isComplete, isDaily, questID =
+            GetQuestLogTitle(i)
+
+        -- Do not break the loop because title=nil (you have a dummy entry #1)
+        if title and not isHeader and questID and questID > 0 then
+            if questID == questId then
+                return i
+            end
+        end
+    end
+    return nil
+end
+
+function QuestieCompat.GetQuestIDFromLogIndex(questLogIndex)
+    return select(8, QuestieCompat.GetQuestLogTitle(questLogIndex))
+end
+
+local QUESTIE_DUPLICATE_POI_ICON_TYPES = {
+    complete = true,
+    monster = true,
+    object = true,
+    item = true,
+    event = true,
+}
+
+local BLIZZARD_POI_QUEST_ID_FIELDS = {
+    "questID",
+    "questId",
+    "questIDNumber",
+    "questIDNum",
+    "questLogID",
+    "id",
+}
+
+local BLIZZARD_POI_QUEST_LOG_INDEX_FIELDS = {
+    "questLogIndex",
+    "questIndex",
+    "logIndex",
+}
+
+local function _ToPositiveNumber(value)
+    if type(value) == "number" or type(value) == "string" then
+        local number = tonumber(value)
+        if number and number > 0 then
+            return number
+        end
+    end
+
+    return nil
+end
+
+---Enables Blizzard/server objective POIs without globally disabling them when Questie objectives are on.
+function QuestieCompat.EnableBlizzardObjectivePOIs()
+    if GetCVar and GetCVar("questPOI") ~= nil and SetCVar then
+        SetCVar("questPOI", "1")
+    end
+
+    if WorldMapQuestShowObjectives and WorldMapQuestShowObjectives.SetChecked then
+        WorldMapQuestShowObjectives:SetChecked(true)
+    end
+end
+
+---@param frame table
+---@return boolean
+local function _IsVisibleQuestiePOIFrame(frame)
+    if (not frame) or (not frame.data) or (not QUESTIE_DUPLICATE_POI_ICON_TYPES[frame.data.Type]) then
+        return false
+    end
+
+    if frame.ShouldBeHidden then
+        return not frame:ShouldBeHidden()
+    end
+
+    return not frame.hidden
+end
+
+---@param questId number
+---@return boolean
+function QuestieCompat.HasVisibleQuestiePOIForQuest(questId)
+    if (not questId) or questId <= 0 then
+        return false
+    end
+
+    local QuestieMap = QuestieLoader:ImportModule("QuestieMap")
+    local questFrames = QuestieMap.questIdFrames and QuestieMap.questIdFrames[questId]
+    if not questFrames then
+        return false
+    end
+
+    for _, frameName in pairs(questFrames) do
+        if _IsVisibleQuestiePOIFrame(_G[frameName]) then
+            return true
+        end
+    end
+
+    return false
+end
+
+---@param poiButton table
+---@return number|nil
+function QuestieCompat.GetQuestIDFromBlizzardPOIButton(poiButton)
+    if not poiButton then
+        return nil
+    end
+
+    for _, field in ipairs(BLIZZARD_POI_QUEST_ID_FIELDS) do
+        local questId = _ToPositiveNumber(poiButton[field])
+        if questId then
+            return questId
+        end
+    end
+
+    for _, field in ipairs(BLIZZARD_POI_QUEST_LOG_INDEX_FIELDS) do
+        local questLogIndex = _ToPositiveNumber(poiButton[field])
+        if questLogIndex then
+            local questId = QuestieCompat.GetQuestIDFromLogIndex(questLogIndex)
+            if questId and questId > 0 then
+                return questId
+            end
+        end
+    end
+
+    return nil
+end
+
+---@param poiButton table
+function QuestieCompat.SuppressDuplicateBlizzardPOIButton(poiButton)
+    local questId = QuestieCompat.GetQuestIDFromBlizzardPOIButton(poiButton)
+    if questId and QuestieCompat.HasVisibleQuestiePOIForQuest(questId) then
+        poiButton.questieDuplicateSuppressed = true
+        poiButton:Hide()
+    end
+end
+
+function QuestieCompat.SuppressDuplicateBlizzardPOI(parentName, buttonType, buttonIndex)
+    local poiButton = _G[string.format(
+        "poi%s%s_%d",
+        tostring(parentName or ""),
+        tostring(buttonType or ""),
+        _ToPositiveNumber(buttonIndex) or 0
+    )]
+    if poiButton then
+        QuestieCompat.SuppressDuplicateBlizzardPOIButton(poiButton)
+    end
+end
+
+function QuestieCompat.InitializeBlizzardPOISuppression()
+    if QuestieCompat._blizzardPOISuppressionHooked then
+        return
+    end
+
+    local hooked = false
+    if QuestPOI_DisplayButton then
+        hooksecurefunc("QuestPOI_DisplayButton", function(parentName, buttonType, buttonIndex)
+            QuestieCompat.SuppressDuplicateBlizzardPOI(parentName, buttonType, buttonIndex)
+        end)
+        hooked = true
+    end
+
+    if QuestPOI_SelectButton then
+        hooksecurefunc("QuestPOI_SelectButton", function(poiButton)
+            QuestieCompat.SuppressDuplicateBlizzardPOIButton(poiButton)
+        end)
+        hooked = true
+    end
+
+    QuestieCompat._blizzardPOISuppressionHooked = hooked
+end
+
+-- https://wowpedia.fandom.com/wiki/API_GetQuestLink
+-- Returns a QuestLink for a quest.
+-- Between patches 6.2 and 7.3.2 argument was changed to take a QuestID instead of a quest log index.
+function QuestieCompat.GetQuestLink(questId)
+    local questLogIndex = QuestieCompat.GetQuestLogIndexByID(questId)
+    return questLogIndex and GetQuestLink(questLogIndex)
+end
+
+-- https://wowpedia.fandom.com/wiki/API_GetQuestLogRewardMoney
+-- Returns the amount of money rewarded for a quest.
+function QuestieCompat.GetQuestLogRewardMoney(questID)
+    local rewardMoney = QuestieCompat.RewardMoney[questID] or 0
+    local rewardMoneyDifficulty = QuestieCompat.RewardMoneyDifficulty[questID] or 0
+
+    if rewardMoney < 0 then -- required money
+        return rewardMoney
+    end
+
+    local playerLevel = QuestiePlayer.GetPlayerLevel()
+    if playerLevel > 0 and rewardMoneyDifficulty > 0 then
+        rewardMoney = QuestieCompat.QuestMoneyReward[playerLevel][rewardMoneyDifficulty]
+    end
+
+    -- https://wowpedia.fandom.com/wiki/Quest?oldid=1035002 Formula is XP gained * 6c
+    if QuestiePlayer.IsMaxLevel() then
+        local xpReward = QuestXP:GetQuestLogRewardXP(questID, true)
+        if xpReward > 0 then
+            rewardMoney = rewardMoney + xpReward * 6
+        end
+    end
+
+    return rewardMoney
+end
+
+function QuestieCompat.CalculateNextResetTime()
+    local currentTime, currentDate = QuestieCompat.GetServerTime()
+    local timeUntilReset = GetQuestResetTime()
+
+    Questie:Debug(Questie.DEBUG_DEVELOP, "[CalculateNextResetTime] GetQuestResetTime: ", timeUntilReset)
+    -- Some private/modified servers can return negative or zero values here.
+    -- Instead of erroring out (and spamming chat), fall back to a sane default
+    -- daily reset of 24 hours from now.
+    if (not timeUntilReset) or (timeUntilReset <= 0) then
+        Questie:Debug(Questie.DEBUG_DEVELOP,
+            "[CalculateNextResetTime] Invalid GetQuestResetTime (" .. tostring(timeUntilReset) ..
+            ") - using 24h fallback")
+        timeUntilReset = 24 * 60 * 60
+    end
+    Questie.db.profile.dailyResetTime = Questie.db.profile.dailyResetTime or (currentTime + timeUntilReset)
+    Questie:Debug(Questie.DEBUG_DEVELOP, "[CalculateNextResetTime] Next daily rest time: ",
+        date("%m/%d/%y %H:%M:%S", Questie.db.profile.dailyResetTime))
+
+    Questie.db.profile.weeklyResetHour = Questie.db.profile.weeklyResetHour or
+        tonumber(date("%H", Questie.db.profile.dailyResetTime + 300))
+    local dayOffset = math.mod(Questie.db.profile.weeklyResetDay - currentDate.weekday + 7, 7)
+    if dayOffset == 0 and currentDate.hour >= Questie.db.profile.weeklyResetHour then
+        dayOffset = 7
+    end
+
+    Questie.db.profile.weeklyResetTime = Questie.db.profile.weeklyResetTime or time({
+        year = currentDate.year,
+        month = currentDate.month,
+        day = currentDate.day + dayOffset,
+        hour = Questie.db.profile.weeklyResetHour,
+    })
+    Questie:Debug(Questie.DEBUG_DEVELOP, "[CalculateNextResetTime] Next weekly rest time: ",
+        date("%m/%d/%y %H:%M:%S", Questie.db.profile.weeklyResetTime))
+end
+
+function QuestieCompat.ResetDailyQuests(reset)
+    local currentTime = QuestieCompat.GetServerTime()
+
+    if reset or (currentTime > Questie.db.profile.dailyResetTime) then
+        local questId = next(Questie.db.char.daily)
+        while questId do
+            Questie.db.char.daily[questId] = nil
+            Questie.db.char.complete[questId] = nil
+            questId = next(Questie.db.char.daily, questId)
+        end
+        Questie.db.profile.dailyResetTime = nil
+        QuestieCompat.CalculateNextResetTime()
+        if Questie.started then
+            AvailableQuests.CalculateAndDrawAll()
+        end
+    end
+end
+
+local weeklyResetTimer
+function QuestieCompat.ResetWeeklyQuests()
+    local currentTime = QuestieCompat.GetServerTime()
+    local timeUntilReset = Questie.db.profile.weeklyResetTime - currentTime
+
+    if timeUntilReset < 1800 then
+        if weeklyResetTimer then
+            weeklyResetTimer = weeklyResetTimer:Cancel()
+        end
+
+        weeklyResetTimer = weeklyResetTimer or QuestieCompat.C_Timer.After(timeUntilReset, function()
+            local questId = next(Questie.db.char.weekly)
+            while questId do
+                Questie.db.char.weekly[questId] = nil
+                Questie.db.char.complete[questId] = nil
+                questId = next(Questie.db.char.weekly, questId)
+            end
+            Questie.db.profile.weeklyResetTime = nil
+            QuestieCompat.CalculateNextResetTime()
+            if Questie.started then
+                AvailableQuests.CalculateAndDrawAll()
+            end
+        end)
+
+        return true
+    end
+end
+
+function QuestieCompat.SetQuestComplete(questId)
+    if (not QuestieDB.IsRepeatable(questId)) then
+        Questie.db.char.complete[questId] = true
+    end
+
+    if Questie.db.profile.resetDailyQuests then
+        if QuestieDB.IsDailyQuest(questId) then
+            Questie.db.char.daily[questId] = true
+            Questie.db.char.complete[questId] = true
+        elseif QuestieDB.IsWeeklyQuest(questId) then
+            Questie.db.char.weekly[questId] = true
+            Questie.db.char.complete[questId] = true
+        end
+    end
+end
+
+-- Returns a list of quests the character has completed in its lifetime.
+-- https://wowpedia.fandom.com/wiki/API_GetQuestsCompleted
+local function ClearQuestCompleteTable(tbl)
+    if type(tbl) ~= "table" then return end
+    for key in pairs(tbl) do
+        tbl[key] = nil
+    end
+end
+
+function QuestieCompat.GetQuestsCompleted()
+    if not Questie.db.char.complete then
+        Questie.db.char.complete = {}
+    else
+        ClearQuestCompleteTable(Questie.db.char.complete)
+    end
+
+    QueryQuestsCompleted()
+    return Questie.db.char.complete
+end
+
+-- Fires when the data requested by QueryQuestsCompleted() is available.
+-- https://wowpedia.fandom.com/wiki/QUEST_QUERY_COMPLETE
+function QuestieCompat:QUEST_QUERY_COMPLETE(event)
+    if not Questie.db.char.complete then
+        Questie.db.char.complete = {}
+    end
+    ClearQuestCompleteTable(Questie.db.char.complete)
+    GetQuestsCompleted(Questie.db.char.complete)
+
+    local questId = next(Questie.db.char.complete)
+    while questId do
+        if QuestieDB.IsRepeatable(questId) then
+            Questie.db.char.complete[questId] = nil
+        end
+        questId = next(Questie.db.char.complete, questId)
+    end
+
+    if Questie.db.profile.resetDailyQuests then
+        QuestieCompat.CalculateNextResetTime()
+        QuestieCompat.ResetDailyQuests()
+        QuestieCompat.Merge(Questie.db.char.complete, Questie.db.char.daily)
+
+        if Questie.IsWotlk and QuestiePlayer.GetPlayerLevel() >= 78 then
+            if (not QuestieCompat.ResetWeeklyQuests()) and (Questie.db.profile.weeklyResetDay == CalendarGetDate()) then
+                weeklyResetTimer = weeklyResetTimer or
+                    QuestieCompat.C_Timer.NewTicker(1800, QuestieCompat.ResetWeeklyQuests)
+            end
+            QuestieCompat.Merge(Questie.db.char.complete, Questie.db.char.weekly)
+        end
+    end
+
+    -- The completed-quest list arrives asynchronously from the server (this event), often
+    -- AFTER available quests were first drawn — so quests that are actually already complete
+    -- kept showing as available '!' until something else forced a redraw (e.g. /reload).
+    -- Recalculate now that char.complete is populated so completed quests are removed. (#7)
+    if QuestieQuest and QuestieQuest.started and AvailableQuests and AvailableQuests.CalculateAndDrawAll then
+        AvailableQuests.CalculateAndDrawAll()
+    end
+end
+
+-- https://wowpedia.fandom.com/wiki/API_IsQuestFlaggedCompleted
+-- Determine if a quest has been completed.
+function QuestieCompat.IsQuestFlaggedCompleted(questID)
+    return Questie.db.char.complete[questID] or false
+end
+
+---Returns the available quests at a quest giver.
+-- https://wowpedia.fandom.com/wiki/API_GetGossipAvailableQuests
+function QuestieCompat.GetAvailableQuests()
+    local availableQuests = { GetGossipAvailableQuests() }
+    local numAvailable = GetNumGossipAvailableQuests()
+    for i = 1, numAvailable do
+        local index = (i - 1) * 5
+        availableQuests[index + 3] = availableQuests[index + 3] and true or false
+        availableQuests[index + 4] = availableQuests[index + 4] and 2 or 1
+        availableQuests[index + 5] = availableQuests[index + 5] and true or false
+    end
+    for i = 1, numAvailable do
+        local index = (i - 1) * 7
+        table.insert(availableQuests, index + 6, false)
+        table.insert(availableQuests, index + 7, false)
+    end
+    return unpack(availableQuests)
+end
+
+-- Returns the quests which can be turned in at a quest giver.
+-- https://wowpedia.fandom.com/wiki/API_GetGossipActiveQuests
+function QuestieCompat.GetActiveQuests()
+    local activeQuests = { GetGossipActiveQuests() }
+    local numActive = GetNumGossipActiveQuests()
+    for i = 1, numActive do
+        local index = (i - 1) * 4
+        activeQuests[index + 3] = activeQuests[index + 3] and true or false
+        activeQuests[index + 4] = activeQuests[index + 4] and true or false
+    end
+    for i = 1, numActive do
+        local index = (i - 1) * 6
+        table.insert(activeQuests, index + 5, false)
+        table.insert(activeQuests, index + 6, false)
+    end
+    return unpack(activeQuests)
+end
+
+local questTagToName = {
+    [1] = "Group",
+    [41] = "PvP",
+    [62] = "Raid",
+    [81] = "Dungeon",
+    [82] = "World Event",
+    [83] = "Legendary",
+    [84] = "Escort",
+    [85] = "Heroic",
+}
+
+-- Retrieves tag information about the quest.
+-- https://wowpedia.fandom.com/wiki/API_GetQuestTagInfo
+function QuestieCompat.GetQuestTagInfo(questId)
+    local tagId = QuestieCompat.QuestTag[questId]
+    if tagId then
+        return tagId, questTagToName[tagId]
+    end
+end
+
+-- Returns the ID of the displayed quest at a quest giver.
+-- https://wowpedia.fandom.com/wiki/API_GetQuestID
+function QuestieCompat.GetQuestID(questStarter, title)
+    local title = title or GetTitleText()
+    local guid = QuestieCompat.UnitGUID("npc")
+
+    return QuestieDB.GetQuestIDFromName(title, guid, questStarter)
+end
+
+function QuestieCompat.GetQuestIDFromName(questTitle)
+    local numEntries = select(1, GetNumQuestLogEntries()) or 0
+    for questLogIndex = 1, numEntries do
+        local title, _, _, _, isHeader, _, _, _, id = GetQuestLogTitle(questLogIndex)
+        if title and (not isHeader) and id and id > 0 and title == questTitle then
+            return id
+        end
+    end
+end
+
+-- https://wowwiki-archive.fandom.com/wiki/API_UnitGUID?oldid=2368080
+local GUIDType = {
+    [0] = "Player",
+    [1] = "GameObject",
+    [3] = "Creature",
+    [4] = "Pet",
+    [5] = "Vehicle"
+}
+
+-- Returns the GUID of the unit.
+-- https://wowpedia.fandom.com/wiki/GUID
+-- Patch 6.0.2 (2014-10-14): Changed to a new format
+function QuestieCompat.UnitGUID(unit)
+    local guid = UnitGUID(unit)
+    if guid then
+        local math_mod = math.mod or math.fmod
+        local type
+        if math_mod then
+            type = math_mod(tonumber(string.sub(guid, 5, 5), 16), 8)
+        else
+            local val = tonumber(string.sub(guid, 5, 5), 16)
+            type = val - math.floor(val / 8) * 8
+        end
+        if type and (type == 1 or type == 3 or type == 5) then
+            local id = tonumber(string.sub(guid, 6, 12), 16)
+            -- Creature-0-[serverID]-[instanceID]-[zoneUID]-[npcID]-[spawnUID]
+            return string.format("%s-0-4170-0-41-%d-00000F4B37", GUIDType[type], id)
+        end
+    end
+end
+
+function QuestieCompat.GetMaxPlayerLevel()
+    return (Questie.IsWotlk and 80) or (Questie.IsTBC and 70) or (Questie.IsClassic and 60)
+end
+
+-- https://wowpedia.fandom.com/wiki/API_UnitAura?oldid=2681338
+-- Returns the buffs/debuffs for the unit.
+-- an alias for UnitAura(unit, index, "HELPFUL"), returning only buffs.
+-- Patch 8.0.1 (2018-07-17): Removed 'rank' return value.
+function QuestieCompat.UnitBuff(unit, index)
+    local name, rank, icon, count, debuffType, duration, expirationTime,
+    unitCaster, isStealable, shouldConsolidate, spellId = UnitBuff(unit, index)
+    return name, icon, count, debuffType, duration, expirationTime, unitCaster, isStealable, shouldConsolidate, spellId
+end
+
+-- Returns the race of the unit.
+-- https://wowpedia.fandom.com/wiki/API_UnitRace
+function QuestieCompat.UnitRace(unit)
+    local raceName, raceFile = UnitRace(unit)
+    return raceName, raceFile, QuestieCompat.ChrRaces[raceFile]
+end
+
+-- Returns the class of the unit.
+-- https://wowpedia.fandom.com/wiki/API_UnitClass
+-- Patch 5.0.4 (2012-08-28): Added classId return value.
+function QuestieCompat.UnitClass(unit)
+    local className, classFile = UnitClass(unit)
+    return className, classFile, QuestieCompat.ChrClasses[classFile]
+end
+
+-- Returns info for a faction.
+-- https://wowpedia.fandom.com/wiki/API_GetFactionInfo
+-- Patch 5.0.4 (2012-08-28): Added new return value: factionID
+-- TODO: localize factions name(https://www.curseforge.com/wow/addons/libbabble-faction-3-0)
+function QuestieCompat.GetFactionInfo(factionIndex)
+    local name, description, standingId, bottomValue, topValue, earnedValue, atWarWith,
+    canToggleAtWar, isHeader, isCollapsed, hasRep, isWatched, isChild = GetFactionInfo(factionIndex)
+
+    return name, description, standingId, bottomValue, topValue, earnedValue, atWarWith,
+        canToggleAtWar, isHeader, isCollapsed, hasRep, isWatched, isChild, QuestieCompat.FactionId[name:trim()]
+end
+
+-- Returns faction info by factionID.
+-- https://wowpedia.fandom.com/wiki/API_GetFactionInfoByID
+-- Patch 4.0.1 (Cataclysm): Added.
+-- On 3.3.5, this API does not exist, so we iterate GetFactionInfo indices and use
+-- our FactionId reverse lookup to match by ID.
+local _factionIdReverse = nil
+function QuestieCompat.GetFactionInfoByID(factionID)
+    if not factionID then return nil end
+
+    -- Build reverse map once (id -> name) from QuestieCompat.FactionId (name -> id)
+    if not _factionIdReverse then
+        _factionIdReverse = {}
+        for name, id in next, QuestieCompat.FactionId do
+            _factionIdReverse[id] = name
+        end
+    end
+
+    -- Fast path: try reverse lookup from our hardcoded faction data
+    local name = _factionIdReverse[factionID]
+    if name then
+        -- Find the faction in the reputation UI to get full info
+        local numFactions = GetNumFactions()
+        for i = 1, numFactions do
+            local fName, description, standingId, bottomValue, topValue, earnedValue,
+                atWarWith, canToggleAtWar, isHeader, isCollapsed, hasRep, isWatched, isChild = GetFactionInfo(i)
+            if fName and fName:trim() == name then
+                return fName, description, standingId, bottomValue, topValue, earnedValue,
+                    atWarWith, canToggleAtWar, isHeader, isCollapsed, hasRep, isWatched, isChild, factionID
+            end
+        end
+        -- Faction is in our DB but not in the reputation UI yet — return name-only
+        return name
+    end
+
+    -- Slow path: iterate all visible factions and check their ID via our name->id table
+    local numFactions = GetNumFactions()
+    for i = 1, numFactions do
+        local fName, description, standingId, bottomValue, topValue, earnedValue,
+            atWarWith, canToggleAtWar, isHeader, isCollapsed, hasRep, isWatched, isChild = GetFactionInfo(i)
+        if fName then
+            local fId = QuestieCompat.FactionId[fName:trim()]
+            if fId == factionID then
+                return fName, description, standingId, bottomValue, topValue, earnedValue,
+                    atWarWith, canToggleAtWar, isHeader, isCollapsed, hasRep, isWatched, isChild, factionID
+            end
+        end
+    end
+
+    -- Faction not found
+    return nil
+end
+
+-- Returns true if the unit is a member of your party
+-- https://wowpedia.fandom.com/wiki/API_UnitInParty
+-- As of 2.0.3, UnitInParty("player") always returns 1, even when you are not in a party.
+function QuestieCompat.UnitInParty(unit)
+    if unit == "player" then
+        return QuestieCompat.IsInGroup()
+    end
+    return UnitInParty(unit)
+end
+
+-- Returns true if the player is in a group.
+-- https://wowpedia.fandom.com/wiki/API_IsInGroup
+function QuestieCompat.IsInGroup(groupType)
+    if groupType then return false end
+    return UnitInParty("player") and GetNumPartyMembers() > 0
+end
+
+-- Returns true if the player is in a raid.
+-- https://wowpedia.fandom.com/wiki/API_IsInRaid
+function QuestieCompat.IsInRaid(groupType)
+    if groupType then return false end
+    return UnitInRaid("player") and GetNumRaidMembers() > 0
+end
+
+-- Returns names of characters in your home (non-instance) party.
+-- https://wowpedia.fandom.com/wiki/API_GetHomePartyInfo
+function QuestieCompat.GetHomePartyInfo(homePlayers)
+    if QuestieCompat.UnitInParty("player") then
+        homePlayers = homePlayers or {}
+        for i = 1, MAX_PARTY_MEMBERS do
+            if GetPartyMember(i) then
+                table.insert(homePlayers, UnitName("party" .. i))
+            end
+        end
+        return homePlayers
+    end
+end
+
+-- Gets a list of the auction house item classes.
+-- https://wowpedia.fandom.com/wiki/API_GetAuctionItemClasses?oldid=1835520
+local itemClass = { GetAuctionItemClasses() }
+for classId=1, #itemClass do
+    local className = itemClass[classId]
+    itemClass[className] = classId
+    itemClass[classId] = nil
+end
+
+-- Returns info for an item.
+-- https://wowpedia.fandom.com/wiki/API_GetItemInfo?oldid=2376031
+-- Patch 7.0.3 (2016-07-19): Added classID, subclassID returns.
+function QuestieCompat.GetItemInfo(item)
+    local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType,
+    itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice = GetItemInfo(item)
+
+    return itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType,
+        itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice, itemClass[itemType]
+end
+
+-- Returns info for an item in a container slot.
+-- https://wowpedia.fandom.com/wiki/API_GetContainerItemInfo
+function QuestieCompat.GetContainerItemInfo(bagID, slot)
+    local iconFile, stackCount, isLocked, quality, isReadable, hasLoot, hyperlink = GetContainerItemInfo(bagID, slot)
+    if hyperlink then
+        local itemID = string.match(hyperlink, "(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+):(%-?%d+)")
+        -- GetContainerItemInfo does not return a quality value for all items.  If it does not, it returns -1
+        if quality and quality < 0 then
+            quality = (select(3, GetItemInfo(hyperlink)))
+        end
+
+        return iconFile, stackCount, isLocked, quality, isReadable, hasLoot, hyperlink, false, false, tonumber(itemID),
+            false
+    end
+end
+
+-- https://wowpedia.fandom.com/wiki/API_IsSpellKnown
+QuestieCompat.IsSpellKnownOrOverridesKnown = IsSpellKnown
+QuestieCompat.IsPlayerSpell = IsSpellKnown
+
+local LARGE_NUMBER_SEPERATOR = ".";
+function QuestieCompat.FormatLargeNumber(amount)
+    amount = tostring(amount);
+    local newDisplay = "";
+    local strlen = string.len(amount);
+    --Add each thing behind a comma
+    for i = 4, strlen, 3 do
+        newDisplay = LARGE_NUMBER_SEPERATOR .. string.sub(amount, -(i - 1), -(i - 3)) .. newDisplay;
+    end
+    --Add everything before the first comma
+    newDisplay = string.sub(amount, 1, (math.mod(strlen, 3) == 0) and 3 or (math.mod(strlen, 3))) .. newDisplay;
+    return newDisplay;
+end
+
+local function Round(value)
+    if value < 0.0 then
+        return math.ceil(value - .5);
+    end
+    return math.floor(value + .5);
+end
+QuestieCompat.Round = Round
+
+local function GenerateHexColor(r, g, b, a)
+    return string.format(("ff%.2x%.2x%.2x"), Round(r * 255), Round(g * 255), Round(b * 255), Round((a or 1) * 255));
+end
+
+-- Returns the color value associated with a given class.
+function QuestieCompat.GetClassColor(classFilename)
+    local color = RAID_CLASS_COLORS[classFilename];
+    if color then
+        return color.r, color.g, color.b, GenerateHexColor(color.r, color.g, color.b)
+    end
+    return 1, 1, 1, "ffffffff";
+end
+
+-- handle tooltip based on the parent frame
+function QuestieCompat.SetupTooltip(frame, OnHide)
+    if (frame:GetParent() == WorldMapFrame) then
+        WorldMapPOIFrame.allowBlobTooltip = OnHide and true or false
+        QuestieCompat.Tooltip = WorldMapTooltip
+    else
+        QuestieCompat.Tooltip = GameTooltip
+    end
+    return QuestieCompat.Tooltip
+end
+
+local wrappedLines = {}
+-- tooltip word wrapping looks fine the way it is, leave it for now
+function QuestieCompat.TextWrap(self, line, prefix, combineTrailing, desiredWidth)
+    QuestieCompat.Tooltip:AddLine(line, 0.86, 0.86, 0.86, 1);
+    return wrappedLines
+end
+
+local unboundedFS = UIParent:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+unboundedFS:SetPoint("TOPLEFT", 0, 0)
+unboundedFS:Hide()
+
+-- The minimum width necessary to contain the entire text without truncation
+-- https://wowpedia.fandom.com/wiki/API_FontString_GetStringWidth
+function QuestieCompat.GetUnboundedStringWidth(self)
+    unboundedFS:SetWidth(0)
+    unboundedFS:SetFont(self:GetFont())
+    unboundedFS:SetText(self:GetText())
+
+    return unboundedFS:GetStringWidth()
+end
+
+-- Number of lines of wrapped text
+-- https://wowpedia.fandom.com/wiki/API_FontString_GetNumLines
+function QuestieCompat.GetNumLines(self)
+    local fontName, fontHeight, fontFlags = self:GetFont()
+    unboundedFS:SetWidth(self:GetWidth())
+    unboundedFS:SetFont(fontName, fontHeight, fontFlags)
+    unboundedFS:SetText(self:GetText())
+
+    return math.ceil(unboundedFS:GetHeight() / fontHeight)
+end
+
+-- texture			- Texture
+-- canvasFrame      - Canvas Frame (for anchoring)
+-- startX,startY    - Coordinate of start of line
+-- endX,endY		- Coordinate of end of line
+-- lineWidth        - Width of line
+-- relPoint			- Relative point on canvas to interpret coords (Default BOTTOMLEFT)
+local function DrawLine(texture, canvasFrame, startX, startY, endX, endY, lineWidth, lineFactor, relPoint)
+    if (not relPoint) then relPoint = "BOTTOMLEFT"; end
+    lineFactor = lineFactor * .5;
+
+    -- Determine dimensions and center point of line
+    local dx, dy = endX - startX, endY - startY;
+    local cx, cy = (startX + endX) / 2, (startY + endY) / 2;
+
+    -- Normalize direction if necessary
+    if (dx < 0) then
+        dx, dy = -dx, -dy;
+    end
+
+    -- Calculate actual length of line
+    local lineLength = sqrt((dx * dx) + (dy * dy));
+
+    -- Quick escape if it'sin zero length
+    if (lineLength == 0) then
+        texture:ClearAllPoints();
+        texture:SetTexCoord(0, 0, 0, 0, 0, 0, 0, 0);
+        texture:SetPoint("BOTTOMLEFT", canvasFrame, relPoint, cx, cy);
+        texture:SetPoint("TOPRIGHT", canvasFrame, relPoint, cx, cy);
+        return;
+    end
+
+    -- Sin and Cosine of rotation, and combination (for later)
+    local sin, cos = -dy / lineLength, dx / lineLength;
+    local sinCos = sin * cos;
+
+    -- Calculate bounding box size and texture coordinates
+    local boundingWidth, boundingHeight, bottomLeftX, bottomLeftY, topLeftX, topLeftY, topRightX, topRightY, bottomRightX, bottomRightY;
+    if (dy >= 0) then
+        boundingWidth = ((lineLength * cos) - (lineWidth * sin)) * lineFactor;
+        boundingHeight = ((lineWidth * cos) - (lineLength * sin)) * lineFactor;
+
+        bottomLeftX = (lineWidth / lineLength) * sinCos;
+        bottomLeftY = sin * sin;
+        bottomRightY = (lineLength / lineWidth) * sinCos;
+        bottomRightX = 1 - bottomLeftY;
+
+        topLeftX = bottomLeftY;
+        topLeftY = 1 - bottomRightY;
+        topRightX = 1 - bottomLeftX;
+        topRightY = bottomRightX;
+    else
+        boundingWidth = ((lineLength * cos) + (lineWidth * sin)) * lineFactor;
+        boundingHeight = ((lineWidth * cos) + (lineLength * sin)) * lineFactor;
+
+        bottomLeftX = sin * sin;
+        bottomLeftY = -(lineLength / lineWidth) * sinCos;
+        bottomRightX = 1 + (lineWidth / lineLength) * sinCos;
+        bottomRightY = bottomLeftX;
+
+        topLeftX = 1 - bottomRightX;
+        topLeftY = 1 - bottomLeftX;
+        topRightY = 1 - bottomLeftY;
+        topRightX = topLeftY;
+    end
+
+    -- Set texture coordinates and anchors
+    texture:ClearAllPoints();
+    texture:SetTexCoord(topLeftX, topLeftY, bottomLeftX, bottomLeftY, topRightX, topRightY, bottomRightX, bottomRightY);
+    texture:SetPoint("BOTTOMLEFT", canvasFrame, relPoint, cx - boundingWidth, cy - boundingHeight);
+    texture:SetPoint("TOPRIGHT", canvasFrame, relPoint, cx + boundingWidth, cy + boundingHeight);
+end
+
+-- Mix this into a Texture to be able to treat it like a line
+local LineMixin = {};
+
+function LineMixin:SetStartPoint(relPoint, x, y)
+    self.startX, self.startY = x, y;
+end
+
+function LineMixin:SetEndPoint(relPoint, x, y)
+    self.endX, self.endY = x, y;
+end
+
+function LineMixin:SetThickness(thickness)
+    self.thickness = thickness;
+end
+
+function LineMixin:Draw()
+    local parent = self:GetParent();
+    local x, y = parent:GetLeft(), parent:GetBottom();
+
+    self:ClearAllPoints();
+    DrawLine(self, parent, self.startX - x, self.startY - y, self.endX - x, self.endY - y, self.thickness or 32, 1);
+end
+
+local function drawLineOnShow(self)
+    local line = self.line
+    DrawLine(line, self, line.startX, line.startY, line.endX, line.endY, line.thickness * 15, 1.2, "TOPLEFT");
+end
+
+local stub_line = setmetatable({}, QuestieCompat.NOOP_MT)
+-- https://wowpedia.fandom.com/wiki/API_Frame_CreateLine
+function QuestieCompat.CreateLine(self)
+    if self.line then return stub_line end -- stub lineBorder, as our line texture already has border
+
+    local line = self:CreateTexture(nil, "OVERLAY")
+    line:SetTexture(QuestieLib.AddonPath .. "Compat\\Icons\\Waypoint-Line.blp")
+    line.SetColorTexture = line.SetVertexColor
+
+    local k, v = next(LineMixin)
+    while k do
+        line[k] = v
+        k, v = next(LineMixin, k)
+    end
+
+    self:SetScript("OnShow", drawLineOnShow)
+
+    return line
+end
+
+QuestieCompat.LibUIDropDownMenu = {
+    Create_UIDropDownMenu = function(self, name, parent)
+        return CreateFrame("Frame", name, parent, "UIDropDownMenuTemplate")
+    end,
+    EasyMenu = function(self, menuList, menuFrame, anchor, x, y, displayMode, autoHideDelay)
+        EasyMenu(menuList, menuFrame, anchor, x, y, displayMode, autoHideDelay)
+    end,
+    CloseDropDownMenus = function(self, level)
+        CloseDropDownMenus(level)
+    end,
+}
+
+QuestieCompat.KButtons = {
+    Add = function(self, templateName, templateType)
+        local button = CreateFrame("Button", "Questie_WorldMapButton", WorldMapFrame)
+        button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+        if IsAddOnLoaded and IsAddOnLoaded("Mapster") then
+            button:SetPoint("TOPRIGHT", WorldMapFrame, "TOPRIGHT", -50, -72.3)
+        else
+            button:SetPoint("TOPRIGHT", WorldMapFrame, "TOPRIGHT", -50, -40)
+        end
+        --button:SetPoint("TOPRIGHT", WorldMapFrame, "TOPRIGHT", -50, -70);
+        button:SetFrameLevel(99)
+        button:SetSize(32, 32)
+        button:RegisterForClicks("anyUp")
+        button:SetScript("OnMouseDown", QuestieWorldMapButtonMixin.OnMouseDown)
+        button:SetScript("OnEnter", QuestieWorldMapButtonMixin.OnEnter)
+        button:SetScript("OnLeave", function(self) QuestieCompat.SetupTooltip(self, true):Hide() end)
+
+        local background = button:CreateTexture(nil, "BACKGROUND")
+        background:SetSize(25, 25)
+        background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+        background:SetPoint("TOPLEFT", 2, -4)
+
+        local icon = button:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(20, 20)
+        icon:SetTexture(QuestieLib.AddonPath .. "Icons\\complete.blp")
+        icon:SetPoint("TOPLEFT", 6, -5)
+
+        local border = button:CreateTexture(nil, "OVERLAY")
+        border:SetSize(54, 54)
+        border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+        border:SetPoint("TOPLEFT")
+
+        return button
+    end,
+}
+
+--[[
+    xpcall wrapper implementation
+]]
+local xpcall = xpcall
+
+local function errorhandler(err)
+    return geterrorhandler()(err)
+end
+
+local method, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25
+local function call()
+    return method(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25)
+end
+
+function QuestieCompat.xpcall(func, eh, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, p21, p22, p23, p24, p25)
+    if type(func) == "function" then
+        method = func
+        a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25 = p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16, p17, p18, p19, p20, p21, p22, p23, p24, p25
+        return xpcall(call, eh or errorhandler)
+    end
+end
+
+--[[
+    It seems that the table size is capped in 3.3.5, with a maximum of 524,288 entries.
+    For instance, this code triggers an error message: 'memory allocation error: block too big.
+
+    local t = {}
+	for i=1, 524289 do
+		t[i] = true
+	end
+
+    Spliting the table into multiple subtables should do the trick.
+]]
+
+local stringchar = string.char
+local MAX_TABLE_SIZE = 524288
+
+function QuestieCompat._writeByte(self, val)
+    local subIndex = math.ceil(self._pointer / MAX_TABLE_SIZE)
+    local index = self._pointer - (subIndex - 1) * MAX_TABLE_SIZE
+
+    self._bin[subIndex] = self._bin[subIndex] or {}
+    self._bin[subIndex][index] = stringchar(val)
+
+    self._pointer = self._pointer + 1
+end
+
+function QuestieCompat._readByte(self)
+    local subIndex = math.ceil(self._pointer / MAX_TABLE_SIZE)
+    local index = self._pointer - (subIndex - 1) * MAX_TABLE_SIZE
+
+    self._pointer = self._pointer + 1
+
+    return self._bin[subIndex][index]
+end
+
+function QuestieCompat.Save(self)
+    local result = ""
+    for i = 1, table.getn(self._bin) do
+        result = result .. table.concat(self._bin[i])
+    end
+    return result
+end
+
+local _QuestieNameplate = QuestieNameplate.private
+local npFrames = {}
+local npActiveQuestNPCs = {}
+local npBorderTexture = "Interface\\Tooltips\\Nameplate-Border"
+
+local function isNamePlate(frame)
+    if frame.UnitFrame     -- ElvUI
+        or frame.extended  -- TidyPlates
+        or frame.aloftData -- Aloft
+        or frame.kui       -- Kui_Nameplate
+    then
+        return true
+    end
+
+    local _, borderRegion = frame:GetRegions()
+    if borderRegion and borderRegion:GetObjectType() == "Texture" then
+        return borderRegion:GetTexture() == npBorderTexture
+    end
+
+    return false
+end
+
+local function scanWorldFrameChildren(frame, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17,
+                                      a18, a19, a20, a21, a22, a23, a24, a25)
+    if not frame then return end
+
+    if not npFrames[frame] and isNamePlate(frame) then
+        npFrames[frame] = select(7, frame:GetRegions())
+
+        frame:HookScript("OnShow", QuestieCompat.NameplateCreated)
+        frame:HookScript("OnHide", _QuestieNameplate.RemoveFrame)
+
+        if frame:IsShown() then
+            QuestieCompat.NameplateCreated(frame)
+        end
+    end
+    return scanWorldFrameChildren(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19,
+        a20, a21, a22, a23, a24, a25)
+end
+
+function QuestieCompat.NameplateCreated(frame)
+    if IsAddOnLoaded and IsAddOnLoaded("Ascension_NamePlates") then
+        return
+    end
+    local name = npFrames[frame]:GetText()
+    local key = npActiveQuestNPCs[name]
+    if key then
+        local icon = _QuestieNameplate.GetValidIcon(QuestieTooltips.lookupByKey[key])
+
+        if icon then
+            local f = _QuestieNameplate.GetFrame(frame)
+            f.Icon:SetTexture(icon)
+            f.lastIcon = icon -- this is used to prevent updating the texture when it's already what it needs to be
+            f:Show()
+        end
+    end
+end
+
+function QuestieCompat.UpdateNameplate()
+    local frame = next(npFrames)
+    while frame do
+        local name = npFrames[frame]:GetText()
+        local key = npActiveQuestNPCs[name]
+
+        local icon = _QuestieNameplate.GetValidIcon(QuestieTooltips.lookupByKey[key])
+
+        if icon then
+            local f = _QuestieNameplate.GetFrame(frame)
+            -- check if the texture needs to be changed
+            if f.lastIcon ~= icon then
+                f.lastIcon = icon
+                f.Icon:SetTexture(icon)
+            end
+        else
+            -- tooltip removed but we still have the frame active, remove it
+            _QuestieNameplate.RemoveFrame(frame)
+        end
+        frame = next(npFrames, frame)
+    end
+end
+
+function QuestieCompat:QuestieTooltips_RegisterObjectiveTooltip(questId, key, objective)
+    if string.find(key, "m_") then
+        local name = QuestieDB.QueryNPCSingle(tonumber(string.sub(key, 3)), "name")
+        if name then
+            npActiveQuestNPCs[name] = key
+        end
+    end
+end
+
+local _EventHandler = QuestieEventHandler.private
+local chatMessagePattern = {
+    questInfo = {
+        ERR_QUEST_OBJECTIVE_COMPLETE_S,
+        ERR_QUEST_UNKNOWN_COMPLETE,
+        ERR_QUEST_ADD_KILL_SII,
+        ERR_QUEST_ADD_FOUND_SII,
+        ERR_QUEST_ADD_ITEM_SII,
+        ERR_QUEST_ADD_PLAYER_KILL_SII,
+        ERR_QUEST_FAILED_S,
+    },
+    playerLoot = {
+        LOOT_ITEM_CREATED_SELF,
+        LOOT_ITEM_CREATED_SELF_MULTIPLE,
+        LOOT_ITEM_PUSHED_SELF,
+        LOOT_ITEM_PUSHED_SELF_MULTIPLE,
+        LOOT_ITEM_SELF,
+        LOOT_ITEM_SELF_MULTIPLE,
+    }
+}
+
+-- parse chat message for quest related info
+function QuestieCompat.UiInfoMessage(event, message)
+    local _, pattern = next(chatMessagePattern.questInfo)
+    while _ do
+        if string.find(message, pattern) then
+            local objectiveName, numFulfilled = parseQuestObjective(message)
+            if objectiveName and numFulfilled then
+                questObjectivesCache[objectiveName] = numFulfilled
+            end
+            MinimapIcon:UpdateText(message)
+        end
+        _, pattern = next(chatMessagePattern.questInfo, _)
+    end
+end
+
+-- parse chat message for player looting an item
+local playerName = UnitName("player")
+local emptyName = ""
+function QuestieCompat.ChatMessageLoot(message)
+    local _, pattern = next(chatMessagePattern.playerLoot)
+    while _ do
+        if string.find(message, pattern) then
+            return playerName
+        end
+        _, pattern = next(chatMessagePattern.playerLoot, _)
+    end
+    return emptyName
+end
+
+-- handle remote questlog of the party/raid
+function QuestieCompat.GroupRosterUpdate(event)
+    local currentMembers = QuestieCompat.IsInRaid() and GetNumRaidMembers() or GetNumPartyMembers()
+    -- Only want to do logic when number increases, not decreases.
+    if QuestiePlayer.numberOfGroupMembers < currentMembers then
+        if QuestiePlayer.numberOfGroupMembers == 0 then
+            _EventHandler:GroupJoined()
+        end
+        -- Tell comms to send information to members.
+        --Questie:SendMessage("QC_ID_BROADCAST_FULL_QUESTLIST")
+        QuestiePlayer.numberOfGroupMembers = currentMembers
+    else
+        if currentMembers == 0 then
+            _EventHandler:GroupLeft()
+        end
+        -- We do however always want the local to be the current number to allow up and down.
+        QuestiePlayer.numberOfGroupMembers = currentMembers
+    end
+end
+
+function QuestieCompat.QuestieEventHandler_RegisterLateEvents()
+    -- In fullscreen mode, WorldMap intercepts keyboard input,
+    -- preventing the MODIFIER_STATE_CHANGED event
+    if WorldMapFrame:GetScript("OnKeyDown") then
+        local modifierStateChanged
+        WorldMapFrame:HookScript("OnKeyDown", function(self, key)
+            if IsModifierKeyDown() then
+                _EventHandler:ModifierStateChanged(key, 1)
+                modifierStateChanged = true
+            end
+        end)
+        WorldMapFrame:HookScript("OnKeyUp", function(self, key)
+            if modifierStateChanged then
+                _EventHandler:ModifierStateChanged(key, 0)
+                modifierStateChanged = nil
+            end
+        end)
+    end
+
+    Questie:UnregisterEvent("MAP_EXPLORATION_UPDATED") -- https://wowpedia.fandom.com/wiki/MAP_EXPLORATION_UPDATED
+    Questie:UnregisterEvent("NEW_RECIPE_LEARNED")
+
+    -- Party join event for QuestieComms, Use bucket to hinder this from spamming (Ex someone using a raid invite addon etc)
+    Questie:UnregisterEvent("GROUP_ROSTER_UPDATE") -- https://wowpedia.fandom.com/wiki/GROUP_ROSTER_UPDATE
+    Questie:UnregisterEvent("GROUP_JOINED")        -- https://wowpedia.fandom.com/wiki/GROUP_JOINED
+    Questie:UnregisterEvent("GROUP_LEFT")          -- https://wowpedia.fandom.com/wiki/GROUP_LEFT
+    Questie:RegisterEvent("PARTY_MEMBERS_CHANGED", QuestieCompat.GroupRosterUpdate)
+    Questie:RegisterBucketEvent("RAID_ROSTER_UPDATE", 1, QuestieCompat.GroupRosterUpdate)
+
+    -- Nameplate / Target Frame Objective Events
+    Questie:UnregisterEvent("NAME_PLATE_UNIT_ADDED")   -- https://wowpedia.fandom.com/wiki/NAME_PLATE_UNIT_ADDED
+    Questie:UnregisterEvent("NAME_PLATE_UNIT_REMOVED") -- https://wowpedia.fandom.com/wiki/NAME_PLATE_UNIT_REMOVED
+
+    if Questie.db.profile.nameplateEnabled then
+        QuestieNameplate.UpdateNameplate = QuestieCompat.UpdateNameplate
+        hooksecurefunc(QuestieQuest, "GetAllQuestIds", QuestieCompat.UpdateNameplate)
+        hooksecurefunc(QuestieTooltips, "RegisterObjectiveTooltip",
+            QuestieCompat.QuestieTooltips_RegisterObjectiveTooltip)
+
+        local lastNumChildren
+        QuestieCompat.C_Timer.NewTicker(0.1, function()
+            local numChildren = WorldFrame:GetNumChildren()
+            if numChildren ~= lastNumChildren then
+                lastNumChildren = numChildren
+                scanWorldFrameChildren(WorldFrame:GetChildren())
+            end
+        end)
+    end
+end
+
+local _QuestEventHandler = QuestEventHandler.private
+local QUEST_COMPLETE_MSG = string.gsub(ERR_QUEST_COMPLETE_S, "(%%s)", "(.+)")
+local completeQuestCache = {}
+
+local DAILY_QUESTS_MSG = string.gsub(DAILY_QUESTS_REMAINING, "%%d", "(%%d+)"):gsub("|4(.-)$", "")
+
+function QuestieCompat:CHAT_MSG_SYSTEM(event, message)
+    local questName = string.match(message, QUEST_COMPLETE_MSG)
+    if questName then
+        local questId = completeQuestCache[questName] or QuestieCompat.GetQuestIDFromName(questName)
+
+        if questId and questId > 0 then
+            completeQuestCache[questName] = nil
+
+            -- Ensure QuestEventHandler questLog state stays correct on auto turn-in
+            _QuestEventHandler:QuestTurnedIn(questId)
+
+            -- Tiny delay helps if the server removes the quest log entry instantly
+            QuestieCompat.C_Timer.After(0.1, function()
+                _QuestEventHandler:QuestRemoved(questId)
+                if QuestieTracker and QuestieTracker.Update then
+                    QuestieTracker:Update()
+                end
+            end)
+        end
+    end
+
+    if Questie.db.profile.resetDailyQuests then
+        local dailyQuestCount = tonumber(string.match(message, DAILY_QUESTS_MSG))
+        if dailyQuestCount and (dailyQuestCount == GetMaxDailyQuests()) then
+            QuestieCompat.C_Timer.After(1, function()
+                QuestieCompat.ResetDailyQuests(true)
+            end)
+        end
+    end
+end
+
+function QuestieCompat.QuestEventHandler_RegisterEvents()
+    QuestieCompat.frame:RegisterEvent("QUEST_QUERY_COMPLETE")
+    QuestieCompat.frame:RegisterEvent("CHAT_MSG_SYSTEM")
+
+    -- https://wowpedia.fandom.com/wiki/PLAYER_INTERACTION_MANAGER_FRAME_HIDE
+    QuestieQuestEventFrame:UnregisterEvent("PLAYER_INTERACTION_MANAGER_FRAME_HIDE")
+    local closeEvents = {
+        "TRADE_CLOSED",
+        "MERCHANT_CLOSED",
+        "BANKFRAME_CLOSED",
+        "GUILDBANKFRAME_CLOSED",
+        "VENDOR_CLOSED",
+        "MAIL_CLOSED",
+        "AUCTION_HOUSE_CLOSED",
+    }
+    for i=1, #closeEvents do
+        local event = closeEvents[i]
+        QuestieCompat.frame:RegisterEvent(event)
+        QuestieCompat[event] = _QuestEventHandler.QuestRelatedFrameClosed
+    end
+
+    -- https://wowpedia.fandom.com/wiki/QUEST_TURNED_IN
+    QuestieQuestEventFrame:UnregisterEvent("QUEST_TURNED_IN")
+    hooksecurefunc("GetQuestReward", function(itemChoice)
+        -- FIX: Added InCombatLockdown guard to prevent tainting secure execution paths.
+        if InCombatLockdown() then return end
+        local questTitle = GetTitleText()
+        local questId = QuestieCompat.GetQuestIDFromName(questTitle)
+        if questId and questId > 0 then
+            completeQuestCache[questTitle] = questId
+        end
+    end)
+
+    hooksecurefunc("SetAbandonQuest", function()
+        -- FIX: Added InCombatLockdown guard to prevent tainting secure execution paths.
+        if InCombatLockdown() then return end
+        QuestieCompat.abandonQuestID = QuestieCompat.GetQuestIDFromLogIndex(GetQuestLogSelection())
+    end)
+
+    --https://wowpedia.fandom.com/wiki/QUEST_REMOVED
+    QuestieQuestEventFrame:UnregisterEvent("QUEST_REMOVED")
+    hooksecurefunc("AbandonQuest", function()
+        -- FIX: Added InCombatLockdown guard and pcall to prevent tainting secure execution paths.
+        if InCombatLockdown() then return end
+        local questId = QuestieCompat.abandonQuestID or QuestieCompat.GetQuestIDFromLogIndex(GetQuestLogSelection())
+        QuestieCompat.abandonQuestID = nil
+        if questId and questId > 0 then
+            pcall(_QuestEventHandler.QuestRemoved, _QuestEventHandler, questId)
+        end
+    end)
+end
+
+function QuestieCompat.QuestieTracker_Initialize(trackerQuestFrame)
+    -- TrackerHeaderFrame.Initialize
+    Questie_HeaderFrame.trackedQuests.label.GetUnboundedStringWidth = QuestieCompat.GetUnboundedStringWidth
+    -- TrackerQuestFrame.Initialize
+    trackerQuestFrame.ScrollFrame.scrollBarHideable = true
+    trackerQuestFrame.ScrollBar:ClearAllPoints()
+    trackerQuestFrame.ScrollBar:SetPoint("TOPRIGHT", trackerQuestFrame.ScrollUpButton, "BOTTOMRIGHT", -1, 4)
+    trackerQuestFrame.ScrollBar:SetPoint("BOTTOMRIGHT", trackerQuestFrame.ScrollDownButton, "TOPRIGHT", -1, -4)
+    trackerQuestFrame.ScrollDownButton:SetPoint("BOTTOMRIGHT", trackerQuestFrame.ScrollFrame, "BOTTOMRIGHT", -4, 12)
+    trackerQuestFrame.ScrollBg:SetTexture(0, 0, 0, 0.35)
+    trackerQuestFrame.ScrollBg:Show()
+    trackerQuestFrame.ScrollBar.Show = function() end
+    -- TrackerLinePool.Initialize
+    for i = 1, 250 do
+        local line = _G["linePool" .. i]
+        line.label.GetUnboundedStringWidth = QuestieCompat.GetUnboundedStringWidth
+        line.label.GetWrappedWidth = line.label.GetWidth
+        line.label.GetNumLines = QuestieCompat.GetNumLines
+    end
+end
+
+-- prevents the override of existing global variables with the same name(e.g., WorldMapButton)
+function QuestieCompat.PopulateGlobals(self)
+    local name, module = next(QuestieLoader._modules)
+    while name do
+        if not _G[name] then
+            _G[name] = module
+        end
+        name, module = next(QuestieLoader._modules, name)
+    end
+end
+
+-- change sound files extension from .ogg to .wav
+function QuestieCompat.GetSelectedSoundFile(typeSelected)
+    return QuestieCompat.orig_GetSelectedSoundFile(typeSelected):gsub("[^.]+$", "wav")
+end
+
+-- disable builtin quest progress tooltips, re-enable on logout
+function QuestieCompat:ToggleQuestTrackingTooltips(event)
+    local value = tostring(string.find(event, "LOGOUT") and 1 or 0)
+    SetCVar("showQuestTrackingTooltips", value)
+end
+
+QuestieCompat.PLAYER_LOGIN = QuestieCompat.ToggleQuestTrackingTooltips
+QuestieCompat.PLAYER_LOGOUT = QuestieCompat.ToggleQuestTrackingTooltips
+
+local townsfolk_texturemap = {
+    ["Ammo"] = "Interface\\Icons\\inv_ammo_arrow_02",
+    ["Bags"] = "Interface\\Icons\\inv_misc_bag_09",
+    ["Potions"] = "Interface\\Icons\\inv_potion_51",
+    ["Trade Goods"] = "Interface\\Icons\\inv_fabric_wool_02",
+    ["Drink"] = "Interface\\Icons\\inv_potion_01",
+    ["Food"] = "Interface\\Icons\\inv_misc_food_11",
+    ["Pet Food"] = "Interface\\Icons\\ability_hunter_beasttraining",
+    ["Spirit Healer"] = "Interface\\Addons\\" .. QuestieCompat.addonName .. "\\Compat\\Icons\\Raid-Icon-Rez.blp",
+    ["Portal Trainer"] = "Interface\\Addons\\" ..
+        QuestieCompat.addonName .. "\\Compat\\Icons\\Vehicle-AllianceMagePortal.blp",
+}
+
+StaticPopupDialogs["QUESTIE_RELOAD"] = {
+    text = "Changes you have made require a UI reload",
+    button1 = 'Reload UI',
+    button2 = CANCEL,
+    OnAccept = function()
+        ReloadUI()
+    end,
+    OnShow = function(self)
+        self:SetFrameStrata("TOOLTIP")
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3
+}
+
+function QuestieCompat.QuestieOptions_Initialize()
+    QuestieCompat.orig_QuestieOptions_Initialize()
+
+    local optionsTable = LibStub("AceConfigRegistry-3.0"):GetOptionsTable("Questie", "dialog", "MyLib-1.0")
+
+    -- revert instant quest text to old cvar
+    -- (Removed because it was causing UI relocation issues and used wrong CVar for 3.3.5)
+
+    optionsTable.args.nameplate_tab.args.nameplate_options_group.args.nameplateEnabled.set = function(info, value)
+        QuestieOptions:SetProfileValue(info, value)
+        StaticPopup_Show("QUESTIE_RELOAD")
+    end
+
+    -- disable settings for not implemented functionality
+    Questie.db.profile.hideUnexploredMapIcons = false
+    optionsTable.args.icons_tab.args.map_settings_group.args.hideUnexploredMapIconsToggle.disabled = true
+
+    -- 3.3.5 section
+    -- (Removed: natively handled in QuestieOptionsAdvanced now)
+end
+
+local correctionsRegistry = {}
+
+function QuestieCompat.RegisterCorrection(dbName, corrections)
+    correctionsRegistry[dbName] = correctionsRegistry[dbName] or {}
+    table.insert(correctionsRegistry[dbName], corrections)
+end
+
+function QuestieCompat.LoadCorrections(_LoadCorrections, validationTables)
+    local dbName, correctionsList = next(correctionsRegistry)
+    while dbName do
+        local dbKeysReversed = QuestieDB[string.sub(dbName, 1, -5) .. "KeysReversed"]
+        for i=1, #correctionsList do
+            local corrections = correctionsList[i]
+            _LoadCorrections(dbName, corrections(), dbKeysReversed, validationTables)
+        end
+        dbName, correctionsList = next(correctionsRegistry, dbName)
+    end
+end
+
+local blacklistRegistry = {}
+
+function QuestieCompat.RegisterBlacklist(blName, blacklist)
+    blacklistRegistry[blName] = blacklistRegistry[blName] or {}
+    table.insert(blacklistRegistry[blName], blacklist)
+end
+
+function QuestieCompat.LoadBlacklists()
+    local blName, blacklistList = next(blacklistRegistry)
+    while blName do
+        for i=1, #blacklistList do
+            local blacklist = blacklistList[i]
+            QuestieCompat.Merge(QuestieCorrections[blName], blacklist(), true)
+        end
+        blName, blacklistList = next(blacklistRegistry, blName)
+    end
+end
+
+function QuestieCompat.Merge(target, source, override)
+    if type(target) ~= "table" then target = {} end
+    local k, v = next(source)
+    while k do
+        if type(v) == "table" then
+            target[k] = QuestieCompat.Merge(target[k], v, override)
+        elseif target[k] == nil or override then
+            target[k] = v
+        end
+        k, v = next(source, k)
+    end
+    return target
+end
+
+function QuestieCompat:ADDON_LOADED(event, addon)
+    if addon ~= QuestieCompat.addonName then return end
+
+    QuestieCompat.Merge(Questie.db, {
+        profile = {
+            initDelay = 0.03,
+            useWotlkMapData = false,
+            resetDailyQuests = true,
+            weeklyResetDay = 4,
+        },
+        char = {
+            daily = {},
+            weekly = {},
+        }
+    })
+
+    QuestieCompat.LoadUiMapData(Questie.db.profile.useWotlkMapData and QuestieCompat.WOW_PROJECT_WRATH_CLASSIC)
+
+    local uiMapId, data = next(QuestieCompat.UiMapData)
+    while uiMapId do
+        mapIdToUiMapId[data.mapID] = uiMapId
+        uiMapId, data = next(QuestieCompat.UiMapData, uiMapId)
+    end
+
+    -- Ascension uses different areaIds than WotLK (e.g. 3430 for Eversong instead of 463).
+    -- GetCurrentMapAreaID() returns 3430 on Ascension, but UiMapData only maps WotLK areaId 463.
+    -- Without these entries, the parent→child zone conversion in GetCurrentPlayerPosition()
+    -- cannot determine actualUiMapId and falls through, returning Eversong-zone coords tagged
+    -- as Sunstrider (1241) — causing minimap pin drift on child maps like Sunstrider Isle.
+    mapIdToUiMapId[3430] = 1941   -- Eversong Woods (Ascension areaId → uiMapId)
+    mapIdToUiMapId[3431] = 1241   -- Sunstrider Isle (Ascension areaId → uiMapId)
+
+    local k, patterns = next(chatMessagePattern)
+    while k do
+        local i, str = next(patterns)
+        while i do
+            chatMessagePattern[k][i] = QuestieLib:SanitizePattern(str)
+            i, str = next(patterns, i)
+        end
+        k, patterns = next(chatMessagePattern, k)
+    end
+
+    local name, path = next(townsfolk_texturemap)
+    while name do
+        QuestieMenu.private.townsfolk_texturemap[name] = path
+        name, path = next(townsfolk_texturemap, name)
+    end
+
+    local modulesToNoop = {
+        "HBDHooks",
+        "QuestieDebugOffer",
+        "SeasonOfDiscovery",
+        "QuestieDBMIntegration",
+    }
+    for i=1, #modulesToNoop do
+        local moduleName = modulesToNoop[i]
+        local module = QuestieLoader:ImportModule(moduleName)
+        setmetatable(module, QuestieCompat.NOOP_MT)
+    end
+
+    QuestieLoader.PopulateGlobals = QuestieCompat.PopulateGlobals
+    QuestieStream._writeByte = QuestieCompat._writeByte
+    QuestieStream._readByte = QuestieCompat._readByte
+    QuestieStream.Save = QuestieCompat.Save
+    ZoneDB.private.RunTests = QuestieCompat.NOOP
+    QuestieLib.TextWrap = QuestieCompat.TextWrap
+    QuestieCoords.GetPlayerMapPosition = QuestieCompat.GetPlayerMapPosition
+    QuestieCoords.ResetMiniWorldMapText = QuestieCompat.NOOP
+    _EventHandler.UiInfoMessage = QuestieCompat.UiInfoMessage
+    QuestieCompat.orig_QuestieOptions_Initialize = QuestieOptions.Initialize
+    QuestieOptions.Initialize = QuestieCompat.QuestieOptions_Initialize
+    QuestieCompat.orig_GetSelectedSoundFile = Sounds.GetSelectedSoundFile
+    Sounds.GetSelectedSoundFile = QuestieCompat.GetSelectedSoundFile
+
+    hooksecurefunc(QuestieEventHandler, "RegisterLateEvents", QuestieCompat.QuestieEventHandler_RegisterLateEvents)
+    hooksecurefunc(QuestEventHandler, "RegisterEvents", QuestieCompat.QuestEventHandler_RegisterEvents)
+    hooksecurefunc(TrackerLinePool, "Initialize", QuestieCompat.QuestieTracker_Initialize)
+    hooksecurefunc(QuestieQuest, "ToggleNotes", QuestieCompat.HBDPins.UpdateWorldMap)
+
+    local Mapster = LibStub("AceAddon-3.0"):GetAddon("Mapster", true)
+    if Mapster and Mapster.RefreshQuestObjectivesDisplay then
+        hooksecurefunc(Mapster, "RefreshQuestObjectivesDisplay", QuestieCompat.HBDPins.UpdateWorldMap)
+    end
+
+    local MBF = LibStub("AceAddon-3.0"):GetAddon("Minimap Button Frame", true)
+    if MBF and MBF.db.profile.MinimapIcons then
+        table.insert(MBF.db.profile.MinimapIcons, "QuestieFrame")
+        MBF:fillDropdowns()
+    end
+end
+
+-- One-shot minimap drift diagnostic
+SLASH_QUESTIEDRIFT1 = "/qdrift"
+SlashCmdList["QUESTIEDRIFT"] = function()
+    local HBD = QuestieCompat.HBD
+    if not HBD then print("[QD] HBD not loaded"); return end
+
+    -- Player position chain
+    local uiMapID, px, py = QuestieCompat.GetCurrentPlayerPosition()
+    print(string.format("[QD] GetCurrentPlayerPosition: uiMap=%s px=%.6f py=%.6f", tostring(uiMapID), px or -1, py or -1))
+
+    if px and py and uiMapID then
+        local wx, wy, inst = HBD:GetWorldCoordinatesFromZone(px, py, uiMapID)
+        print(string.format("[QD] Player world: HBD:GetWorldCoordinatesFromZone(%s,%.6f,%s) = (%s,%s,%s)",
+            tostring(uiMapID), px, tostring(py), tostring(wx), tostring(wy), tostring(inst)))
+
+        -- If on child map (1241), also check parent conversion
+        if uiMapID == 1241 then
+            -- What if we used 1941 directly?
+            local wx2, wy2, inst2 = HBD:GetWorldCoordinatesFromZone(px, py, 1941)
+            print(string.format("[QD] Player world via 1941: HBD:GetWorldCoordinatesFromZone(1941,%.6f,%s) = (%s,%s,%s)",
+                px, tostring(py), tostring(wx2), tostring(wy2), tostring(inst2)))
+
+            -- Zone coords from world back to 1241
+            if wx and wy then
+                local zx, zy = HBD:GetZoneCoordinatesFromWorld(wx, wy, 1241, true)
+                print(string.format("[QD] Player zone->world->zone: GetZoneCoordinatesFromWorld(%.2f,%.2f,1241) = (%s,%s)",
+                    wx, wy, tostring(zx), tostring(zy)))
+            end
+        end
+    end
+
+    -- Pin data: find first minimap pin with uiMapID
+    local pins = QuestieCompat.HBDPins and QuestieCompat.HBDPins.minimapPins
+    if pins then
+        local count = 0
+        for pin, data in pairs(pins) do
+            if data.uiMapID and count < 3 then
+                count = count + 1
+                print(string.format("[QD] Pin#%d: uiMap=%s pinWorld=(%.2f,%.2f) inst=%s floatOnEdge=%s",
+                    count, tostring(data.uiMapID), data.x or -1, data.y or -1, tostring(data.instanceID), tostring(data.floatOnEdge)))
+                -- Convert pin zone center to world to verify bounds
+                if data.uiMapID then
+                    local cx, cy = HBD:GetWorldCoordinatesFromZone(0.5, 0.5, data.uiMapID)
+                    if cx then
+                        print(string.format("[QD] Pin#%d zone center(0.5,0.5) -> world=(%.2f,%.2f)", count, cx, cy))
+                    end
+                end
+            end
+        end
+        print(string.format("[QD] Total active minimap pins: %d", count))
+    else
+        print("[QD] No minimapPins table found")
+    end
+
+    -- Check mapIdToUiMapId entries
+    print(string.format("[QD] mapIdToUiMapId[3430]=%s mapIdToUiMapId[463]=%s mapIdToUiMapId[3431]=%s",
+        tostring(mapIdToUiMapId[3430]), tostring(mapIdToUiMapId[463]), tostring(mapIdToUiMapId[3431])))
+
+    -- Check current map area
+    local areaId = GetCurrentMapAreaID and GetCurrentMapAreaID()
+    local mapLvl = GetCurrentMapDungeonLevel and GetCurrentMapDungeonLevel()
+    print(string.format("[QD] GetCurrentMapAreaID=%s dungeonLevel=%s composite=%s",
+        tostring(areaId), tostring(mapLvl), tostring(areaId and (areaId + (mapLvl or 0)/10))))
+end
+
+local function ToggleQuestieDebug(flagName, label)
+    local newState = not _G[flagName]
+    _G[flagName] = newState
+    print(string.format("[QD] %s=%s", label, tostring(newState)))
+end
+
+local function SetQuestieDebugGroup(state)
+    _G.QuestieDebugPlayerPosition = state
+    _G.QuestieDebugPlayerWorld = state
+    _G.QuestieDebugMinimapGate = state
+    _G.QuestieDebugMinimapPin = state
+    print(string.format(
+        "[QD] ALL pos=%s world=%s gate=%s pin=%s",
+        tostring(state), tostring(state), tostring(state), tostring(state)))
+end
+
+SLASH_QUESTIEDEBUGPOS1 = "/qdbgpos"
+SlashCmdList["QUESTIEDEBUGPOS"] = function()
+    ToggleQuestieDebug("QuestieDebugPlayerPosition", "PlayerPosition")
+end
+
+SLASH_QUESTIEDEBUGWORLD1 = "/qdbgworld"
+SlashCmdList["QUESTIEDEBUGWORLD"] = function()
+    ToggleQuestieDebug("QuestieDebugPlayerWorld", "PlayerWorld")
+end
+
+SLASH_QUESTIEDEBUGGATE1 = "/qdbggate"
+SlashCmdList["QUESTIEDEBUGGATE"] = function()
+    ToggleQuestieDebug("QuestieDebugMinimapGate", "MinimapGate")
+end
+
+SLASH_QUESTIEDEBUGPIN1 = "/qdbgpin"
+SlashCmdList["QUESTIEDEBUGPIN"] = function()
+    ToggleQuestieDebug("QuestieDebugMinimapPin", "MinimapPin")
+end
+
+SLASH_QUESTIEDEBUGALL1 = "/qdbgall"
+SlashCmdList["QUESTIEDEBUGALL"] = function()
+    local anyOff = not (_G.QuestieDebugPlayerPosition and _G.QuestieDebugPlayerWorld and _G.QuestieDebugMinimapGate and _G.QuestieDebugMinimapPin)
+    SetQuestieDebugGroup(anyOff)
+end

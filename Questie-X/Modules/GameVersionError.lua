@@ -1,0 +1,2 @@
+-- This file is intentionally left empty to remove the "unsupported WoW game client" error popup.
+-- Questie-X is now intended to be universal.
