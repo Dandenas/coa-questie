@@ -808,6 +808,17 @@ function QuestieQuest:UpdateQuest(questId)
     ---@type Quest
     local quest = QuestieDB.GetQuest(questId)
 
+    -- CoA fix: when Questie's quest cache is rebuilt mid-session, GetQuest hands out a NEW quest object
+    -- while the tracker keeps the one stored at accept/login. Updates went to the new copy and the
+    -- tracker stayed at e.g. 0/15 until /reload. Re-link the tracker to the current copy; the old
+    -- copy's map pins are removed first, so the redraw below doesn't leave duplicates behind.
+    local tracked = QuestiePlayer.currentQuestlog[questId]
+    if quest and type(tracked) == "table" and tracked ~= quest then
+        quest.LocalizedName = quest.LocalizedName or tracked.LocalizedName
+        QuestieMap:UnloadQuestFrames(questId)
+        QuestiePlayer.currentQuestlog[questId] = quest
+    end
+
     local sourceItemId = (quest and tonumber(quest.sourceItemId)) or 0
 
     if quest and (not Questie.db.char.complete[questId] or QuestiePlayer.currentQuestlog[questId]) then
@@ -978,6 +989,14 @@ end
 ---@param questId number
 function QuestieQuest:SetObjectivesDirty(questId)
     local quest = QuestieDB.GetQuest(questId)
+
+    -- CoA fix: also dirty the tracker's copy if it is a different (older) object than GetQuest's,
+    -- in case anything reads it before UpdateQuest re-links it.
+    local tracked = QuestiePlayer.currentQuestlog[questId]
+    if type(tracked) == "table" and tracked ~= quest then
+        for _, objective in pairs(tracked.Objectives or {}) do objective.isUpdated = false end
+        for _, objective in pairs(tracked.SpecialObjectives or {}) do objective.isUpdated = false end
+    end
 
     if quest then
         local objKey, objective = next(quest.Objectives or {})

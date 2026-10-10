@@ -561,6 +561,12 @@ function QuestieInit:LoadDatabase(key)
         end
     elseif type(QuestieDB[key]) == "table" then
         Questie:Debug(Questie.DEBUG_DEVELOP, "[LoadDatabase] '" .. key .. "' already a table (split-file format), skipping loadstring")
+    elseif type(QuestieDB[key .. "Overrides"]) == "table" and next(QuestieDB[key .. "Overrides"]) then
+        -- CoA fix: with database plugins (Questie-X-WotLKDB etc.) the base tables stay empty and the data
+        -- arrives as <key>Overrides, injected before this runs (the load waits for pending plugins).
+        -- Flagging that as "missing" forced Runtime mode: Learner for everyone, so learned fallback
+        -- positions (the player's own position at quest NPCs) drew duplicate pins.
+        Questie:Debug(Questie.DEBUG_DEVELOP, "[LoadDatabase] '" .. key .. "' supplied by a database plugin (overrides), not missing")
     else
         Questie:Debug(Questie.DEBUG_DEVELOP, "Database is missing, this is likely do to era vs tbc: ", key)
         MarkBaseDatabaseMissing()

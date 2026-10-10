@@ -1738,12 +1738,25 @@ local _QuestEventHandler = QuestEventHandler.private
 local QUEST_COMPLETE_MSG = string.gsub(ERR_QUEST_COMPLETE_S, "(%%s)", "(.+)")
 local completeQuestCache = {}
 
+-- CoA fix: a quest being turned in is complete in the log. Matching by title alone picked up a same-named
+-- follow-up that was already in the log (e.g. "The People's Militia" 12 -> 13 -> 14), marked IT as turned in,
+-- and its objectives then never updated until /reload. Only accept a complete entry with that title.
+function QuestieCompat.GetCompletedQuestIDFromName(questTitle)
+    local numEntries = select(1, GetNumQuestLogEntries()) or 0
+    for questLogIndex = 1, numEntries do
+        local title, _, _, isHeader, _, isComplete, _, id = QuestieCompat.GetQuestLogTitle(questLogIndex)
+        if title and (not isHeader) and id and id > 0 and title == questTitle and isComplete == 1 then
+            return id
+        end
+    end
+end
+
 local DAILY_QUESTS_MSG = string.gsub(DAILY_QUESTS_REMAINING, "%%d", "(%%d+)"):gsub("|4(.-)$", "")
 
 function QuestieCompat:CHAT_MSG_SYSTEM(event, message)
     local questName = string.match(message, QUEST_COMPLETE_MSG)
     if questName then
-        local questId = completeQuestCache[questName] or QuestieCompat.GetQuestIDFromName(questName)
+        local questId = completeQuestCache[questName] or QuestieCompat.GetCompletedQuestIDFromName(questName)
 
         if questId and questId > 0 then
             completeQuestCache[questName] = nil
@@ -1798,7 +1811,7 @@ function QuestieCompat.QuestEventHandler_RegisterEvents()
         -- FIX: Added InCombatLockdown guard to prevent tainting secure execution paths.
         if InCombatLockdown() then return end
         local questTitle = GetTitleText()
-        local questId = QuestieCompat.GetQuestIDFromName(questTitle)
+        local questId = QuestieCompat.GetCompletedQuestIDFromName(questTitle)
         if questId and questId > 0 then
             completeQuestCache[questTitle] = questId
         end
