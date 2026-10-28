@@ -1353,7 +1353,9 @@ function QuestieTracker:Update()
                                         -- Set Objective based on states
                                         local objDesc = objective.Description:gsub("%.", "")
 
-                                        if (objective.Completed ~= true or (objective.Completed == true and #quest.Objectives > 1)) then
+                                        -- CoA fix: a finished single objective without Blizzard completion text (or with "minimal" colors)
+                                        -- matched neither branch and got no text; an empty line later crashed UpdateHeight.
+                                        if (objective.Completed ~= true or (objective.Completed == true and #quest.Objectives > 1)) or completionText == nil or objectiveColor == "minimal" then
                                             local lineEnding
                                             lineEnding = tostring(objective.Collected) ..
                                                 "/" .. tostring(objective.Needed)
@@ -1495,6 +1497,9 @@ function QuestieTracker:Update()
                                         line.label:SetText(Questie:Colorize(l10n("Quest Complete") .. "!", "green"))
                                     elseif complete == -1 then
                                         line.label:SetText(Questie:Colorize(l10n("Quest Failed") .. "!", "red"))
+                                    else
+                                        -- CoA fix: flagged complete, with objectives but no completion text, used to get no text
+                                        line.label:SetText(Questie:Colorize(l10n("Quest Complete") .. "!", "green"))
                                     end
 
                                     -- Check and measure Objective text width and update tracker width
@@ -2158,14 +2163,21 @@ function QuestieTracker:UpdateHeight()
 
     if Questie.db.char.isTrackerExpanded then
         -- Removes any padding from the last line in the tracker
-        TrackerLinePool.GetCurrentLine():SetHeight(TrackerLinePool.GetCurrentLine().label:GetStringHeight())
+        -- CoA fix: never a height of 0 (an empty line). That unsets the height, the line loses its place and
+        -- GetBottom() returns nil: "attempt to perform arithmetic on a nil value" below.
+        TrackerLinePool.GetCurrentLine():SetHeight(math.max(TrackerLinePool.GetCurrentLine().label:GetStringHeight(), 1))
 
-        if TrackerLinePool.GetCurrentLine().mode == "zone" then
-            -- If a single zone is the only line in the tracker then don't add pixel padding
-            trackerQuestFrame.ScrollChildFrame:SetHeight((TrackerLinePool.GetFirstLine():GetTop() - TrackerLinePool.GetCurrentLine():GetBottom()))
-        else
-            -- Add 3 pixels to bottom of tracker to account for text that traverses beyond the GetStringHeight() function such as lower case "g".
-            trackerQuestFrame.ScrollChildFrame:SetHeight((TrackerLinePool.GetFirstLine():GetTop() - TrackerLinePool.GetCurrentLine():GetBottom() + 3))
+        -- CoA fix: if a line has no position yet, keep the last height; the next update measures again.
+        local firstLineTop = TrackerLinePool.GetFirstLine():GetTop()
+        local currentLineBottom = TrackerLinePool.GetCurrentLine():GetBottom()
+        if firstLineTop and currentLineBottom then
+            if TrackerLinePool.GetCurrentLine().mode == "zone" then
+                -- If a single zone is the only line in the tracker then don't add pixel padding
+                trackerQuestFrame.ScrollChildFrame:SetHeight((firstLineTop - currentLineBottom))
+            else
+                -- Add 3 pixels to bottom of tracker to account for text that traverses beyond the GetStringHeight() function such as lower case "g".
+                trackerQuestFrame.ScrollChildFrame:SetHeight((firstLineTop - currentLineBottom + 3))
+            end
         end
 
         -- Set the baseFrame to full height so we can measure it

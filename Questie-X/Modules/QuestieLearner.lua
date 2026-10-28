@@ -336,7 +336,9 @@ local function CopyWithoutField(data, skippedKey)
     return copy
 end
 
-local function DeepCopy(value)
+-- CoA fix: assigns the DeepCopy declared at the top of the file. "local function" made a second local, so
+-- CopyTable (above) called a nil DeepCopy and switching Data Source Mode back to Auto or Static errored.
+function DeepCopy(value)
     if type(value) ~= "table" then return value end
 
     local copy = {}
@@ -411,6 +413,35 @@ local function InsertIfNewBucket(coordList, x, y, customGrid)
     end
     table.insert(coordList, {x, y, 1})
     return true
+end
+
+-- CoA fix: the DB handle hands out an override's spawn field as it is, so learner coords written into an override
+-- without the database spawns replaced them: two kills hid every other spawn point. This starts the override's spawn
+-- field ([7] NPC, [4] object) from the database spawns; call it before that field is set. Learner Only keeps just
+-- the learner's coords.
+local function SeedOverrideSpawns(ovr, dbType, id)
+    local key = dbType == "NPC" and 7 or 4
+    if type(ovr[key]) == "table" and next(ovr[key]) then return end
+    local query = dbType == "NPC" and QuestieDB.QueryNPCSingle or QuestieDB.QueryObjectSingle
+    local spawns
+    if GetDataSourceMode() ~= "learner" and type(query) == "function" then
+        spawns = query(id, "spawns")
+    end
+    local seeded = {}
+    if type(spawns) == "table" then
+        for zoneId, coords in pairs(spawns) do
+            if type(coords) == "table" then
+                local list = {}
+                for _, coord in ipairs(coords) do
+                    if type(coord) == "table" and coord[1] and coord[2] then
+                        list[#list + 1] = {coord[1], coord[2]}
+                    end
+                end
+                seeded[zoneId] = list
+            end
+        end
+    end
+    ovr[key] = seeded
 end
 
 local function CountUniqueSpawnPositions(spawns)
@@ -1000,7 +1031,16 @@ local function _ApplyNpcLiveUpdate(npcId)
         if IsAscensionProtected("NPC", npcId, 7) and not allowQuestGiverSpawns then
             QuestieDB.npcDataOverrides[npcId] = DeepCopy(CopyWithoutField(existing, 7))
         else
-            QuestieDB.npcDataOverrides[npcId] = DeepCopy(existing)
+            -- CoA fix: start from the database spawns, then add the learned ones (see SeedOverrideSpawns)
+            local newOvr = DeepCopy(CopyWithoutField(existing, 7))
+            SeedOverrideSpawns(newOvr, "NPC", npcId)
+            for zid, coords in pairs(existing[7]) do
+                newOvr[7][zid] = newOvr[7][zid] or {}
+                for _, coord in ipairs(coords) do
+                    InsertIfNewBucket(newOvr[7][zid], coord[1], coord[2], GetCoordGridForZone(zid))
+                end
+            end
+            QuestieDB.npcDataOverrides[npcId] = newOvr
         end
     else
         -- Merge non-spawn fields. IsAscensionProtected is mode-dependent:
@@ -1014,7 +1054,7 @@ local function _ApplyNpcLiveUpdate(npcId)
         -- Merge spawn coords. allowSpawnMerge bypass removed — it was
         -- the original hole letting learner coords leak into curated spawns.
         if existing[7] and (allowQuestGiverSpawns or not IsAscensionProtected("NPC", npcId, 7)) then
-            ovr[7] = ovr[7] or {}
+            SeedOverrideSpawns(ovr, "NPC", npcId) -- CoA fix: was ovr[7] = ovr[7] or {}
             for zid, coords in pairs(existing[7]) do
                 ovr[7][zid] = ovr[7][zid] or {}
                 for _, coord in ipairs(coords) do
@@ -1922,9 +1962,8 @@ local function _MergeSpawnEvidence(npcId)
         if not QuestieDB.npcDataOverrides[npcId] then
             QuestieDB.npcDataOverrides[npcId] = {}
         end
-        if not QuestieDB.npcDataOverrides[npcId][7] then
-            QuestieDB.npcDataOverrides[npcId][7] = {}
-        end
+        -- CoA fix: start from the database spawns (an empty table here let the learned coords replace them)
+        SeedOverrideSpawns(QuestieDB.npcDataOverrides[npcId], "NPC", npcId)
         if not QuestieDB.npcDataOverrides[npcId][7][topEvidence.zoneId] then
             QuestieDB.npcDataOverrides[npcId][7][topEvidence.zoneId] = {}
         end
@@ -2584,7 +2623,17 @@ function QuestieLearner:LearnObject(objectId, name, spawnX, spawnY, spawnZoneId,
             if AscensionOwnsObjectSpawns(objectId) and not allowQuestGiverSpawns then
                 QuestieDB.objectDataOverrides[objectId] = DeepCopy(CopyWithoutField(existing, 4))
             else
-                QuestieDB.objectDataOverrides[objectId] = existing
+                -- CoA fix: a copy that starts from the database spawns, then adds the learned ones. This was the
+                -- learner's own record, so its coords replaced the database's (see SeedOverrideSpawns).
+                local newOvr = CopyWithoutField(existing, 4)
+                SeedOverrideSpawns(newOvr, "OBJECT", objectId)
+                for zid, coords in pairs(type(existing[4]) == "table" and existing[4] or {}) do
+                    newOvr[4][zid] = newOvr[4][zid] or {}
+                    for _, coord in ipairs(coords) do
+                        InsertIfNewBucket(newOvr[4][zid], coord[1], coord[2])
+                    end
+                end
+                QuestieDB.objectDataOverrides[objectId] = newOvr
             end
         else
             for k, v in pairs(existing) do
@@ -2593,7 +2642,7 @@ function QuestieLearner:LearnObject(objectId, name, spawnX, spawnY, spawnZoneId,
             -- Merge spawn coords: learner mode bypasses (IsAscensionProtected=false),
             -- auto/static protects curated spawns. allowSpawnMerge bypass removed.
             if existing[4] and (allowQuestGiverSpawns or not IsAscensionProtected("OBJECT", objectId, 4)) then
-                ovr[4] = ovr[4] or {}
+                SeedOverrideSpawns(ovr, "OBJECT", objectId) -- CoA fix: was ovr[4] = ovr[4] or {}
                 for zid, coords in pairs(existing[4]) do
                     ovr[4][zid] = ovr[4][zid] or {}
                     for _, coord in ipairs(coords) do
@@ -3011,7 +3060,7 @@ function QuestieLearner:InjectLearnedData()
         -- in learner mode where IsAscensionProtected would return false.
         if nativeSpawns and not AscensionOwnsNpcSpawns(realNpcId) then
             local ovr = QuestieDB.npcDataOverrides[realNpcId]
-            ovr[7] = ovr[7] or {}
+            SeedOverrideSpawns(ovr, "NPC", realNpcId) -- CoA fix: was ovr[7] = ovr[7] or {}
             for zoneId, coords in pairs(nativeSpawns) do
                 if type(coords) == "table" then
                     ovr[7][zoneId] = ovr[7][zoneId] or {}
@@ -3202,12 +3251,24 @@ function QuestieLearner:InjectLearnedData()
         end
         self:Sanitize(data)
         if HasQuestObjectReferences(oid or objectId) and not QuestieDB.objectDataOverrides[oid or objectId] then
-            QuestieDB.objectDataOverrides[oid or objectId] = data
+            -- CoA fix: a copy that starts from the database spawns, then adds the learned ones. This was the
+            -- learner's own record, so its coords replaced the database's (see SeedOverrideSpawns).
+            local newOvr = CopyWithoutField(data, 4)
+            SeedOverrideSpawns(newOvr, "OBJECT", oid or objectId)
+            for zoneId, coords in pairs(type(data[4]) == "table" and data[4] or {}) do
+                if type(coords) == "table" then
+                    newOvr[4][zoneId] = newOvr[4][zoneId] or {}
+                    for _, coord in ipairs(coords) do
+                        InsertIfNewBucket(newOvr[4][zoneId], coord[1], coord[2])
+                    end
+                end
+            end
+            QuestieDB.objectDataOverrides[oid or objectId] = newOvr
             objectCount = objectCount + 1
         else
             local existing = QuestieDB.objectDataOverrides[oid or objectId]
             if existing and data[4] and not IsAscensionProtected("OBJECT", oid or objectId, 4) then
-                existing[4] = existing[4] or {}
+                SeedOverrideSpawns(existing, "OBJECT", oid or objectId) -- CoA fix: was existing[4] = existing[4] or {}
                 for zoneId, coords in pairs(data[4]) do
                     existing[4][zoneId] = existing[4][zoneId] or {}
                     for _, coord in ipairs(coords) do
