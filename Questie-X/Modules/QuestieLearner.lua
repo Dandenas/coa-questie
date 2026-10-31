@@ -402,6 +402,11 @@ local function InsertIfNewBucket(coordList, x, y, customGrid)
         end
         local cx, cy = floor((existingX or coord[1]) / grid) * grid, floor((existingY or coord[2]) / grid) * grid
         if cx == bx and cy == by then
+            -- CoA fix: a database position (a plain {x, y}; learned points carry a count) stays put. Averaging learned
+            -- points into it pulled the real pin toward wherever the player had been standing.
+            if coord[3] == nil then
+                return false
+            end
             local count = tonumber(coord[3]) or 1
             local healedCount = count + 1
             local healedX = ((existingX or coord[1]) * count + x) / healedCount
@@ -442,6 +447,25 @@ local function SeedOverrideSpawns(ovr, dbType, id)
         end
     end
     ovr[key] = seeded
+end
+-- CoA fix: a quest giver learned from a mouseover, target or quest window is stored at the player's position, not its
+-- own (spawnSource "fallback"), so hovering over one from across town put a second pin where you stood. Those guesses
+-- are only used while spawnList has no database position (a plain {x, y}; what the learner adds is {x, y, count};
+-- {-1, -1} marks an instance-only NPC and isn't a position). Returns the learned spawns to add to spawnList.
+local function SpawnsToAdd(record, learnedSpawns, spawnList)
+    if record.spawnSource == "fallback" and type(spawnList) == "table" then
+        for _, coords in pairs(spawnList) do
+            if type(coords) == "table" then
+                for _, coord in ipairs(coords) do
+                    if type(coord) == "table" and coord[3] == nil
+                            and (tonumber(coord[1]) or 0) > 0 and (tonumber(coord[2]) or 0) > 0 then
+                        return {}
+                    end
+                end
+            end
+        end
+    end
+    return learnedSpawns
 end
 
 local function CountUniqueSpawnPositions(spawns)
@@ -1034,7 +1058,7 @@ local function _ApplyNpcLiveUpdate(npcId)
             -- CoA fix: start from the database spawns, then add the learned ones (see SeedOverrideSpawns)
             local newOvr = DeepCopy(CopyWithoutField(existing, 7))
             SeedOverrideSpawns(newOvr, "NPC", npcId)
-            for zid, coords in pairs(existing[7]) do
+            for zid, coords in pairs(SpawnsToAdd(existing, existing[7], newOvr[7])) do
                 newOvr[7][zid] = newOvr[7][zid] or {}
                 for _, coord in ipairs(coords) do
                     InsertIfNewBucket(newOvr[7][zid], coord[1], coord[2], GetCoordGridForZone(zid))
@@ -1055,7 +1079,7 @@ local function _ApplyNpcLiveUpdate(npcId)
         -- the original hole letting learner coords leak into curated spawns.
         if existing[7] and (allowQuestGiverSpawns or not IsAscensionProtected("NPC", npcId, 7)) then
             SeedOverrideSpawns(ovr, "NPC", npcId) -- CoA fix: was ovr[7] = ovr[7] or {}
-            for zid, coords in pairs(existing[7]) do
+            for zid, coords in pairs(SpawnsToAdd(existing, existing[7], ovr[7])) do
                 ovr[7][zid] = ovr[7][zid] or {}
                 for _, coord in ipairs(coords) do
                     InsertIfNewBucket(ovr[7][zid], coord[1], coord[2], GetCoordGridForZone(zid))
@@ -3061,7 +3085,7 @@ function QuestieLearner:InjectLearnedData()
         if nativeSpawns and not AscensionOwnsNpcSpawns(realNpcId) then
             local ovr = QuestieDB.npcDataOverrides[realNpcId]
             SeedOverrideSpawns(ovr, "NPC", realNpcId) -- CoA fix: was ovr[7] = ovr[7] or {}
-            for zoneId, coords in pairs(nativeSpawns) do
+            for zoneId, coords in pairs(SpawnsToAdd(data, nativeSpawns, ovr[7])) do
                 if type(coords) == "table" then
                     ovr[7][zoneId] = ovr[7][zoneId] or {}
                     local grid = GetCoordGridForZone(zoneId)

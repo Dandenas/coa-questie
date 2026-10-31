@@ -23,8 +23,12 @@ OPEN_WORLD = (0, 1, 530, 571)
 
 export = json.load(gzip.open(sys.argv[1], "rt", encoding="utf-8"))
 zones = Zones()
-for m in zones.rects:  # CoA's own sub-map areas (10000+) fold into their top-level zone
-    zones.rects[m] = [r for r in zones.rects[m] if r[0] < 10000]
+# CoA's own areas (10000+) are mostly caves and starting valleys, which Questie (like its stock data) keys under the
+# zone around them. Two are whole new zones with their own world map (Pale Reach, Druk'Thar), so they keep theirs:
+# the largest CoA sub-map is about 1,800 yards wide, those zones 3,600 and 5,100.
+COA_ZONE_MIN_WIDTH = 3000
+for m in zones.rects:
+    zones.rects[m] = [r for r in zones.rects[m] if r[0] < 10000 or r[1] - r[2] >= COA_ZONE_MIN_WIDTH]
 
 # ---- stock index (dump_stock.lua) ----
 SQ, SN, SO, SI = {}, set(), set(), set()
@@ -94,14 +98,44 @@ def enders(q):
     return set(e.get("creature", [])), set(e.get("gameobject", []))
 
 
-def spawns(rows):
+# Capital cities: their small maps overlap the zones around them. A spawn inside one stays there (the boards in
+# Orgrimmar must not move to the Barrens map), and a quest sorted under a city doesn't pull mobs outside the walls in.
+CAPITALS = {1497, 1519, 1537, 1637, 1638, 1657, 3487, 3557, 3703, 4395}
+moved_to_quest_zone = 0
+
+
+def place(mapid, wx, wy, prefer):
+    # on a zone border, the zone of the position's own quests when it is on that zone's map too, otherwise the
+    # zone it is furthest inside
+    global moved_to_quest_zone
+    loc = zones.locate(mapid, wx, wy)
+    if loc and loc[0] not in CAPITALS and prefer - CAPITALS:
+        in_quest_zone = zones.locate(mapid, wx, wy, prefer - CAPITALS)
+        if in_quest_zone[0] != loc[0]:
+            moved_to_quest_zone += 1
+            return in_quest_zone
+    return loc
+
+
+def spawns(rows, prefer=frozenset()):
     out = collections.OrderedDict()
     for s in rows:
         if s["map"] not in OPEN_WORLD:
             continue
-        loc = zones.locate(s["map"], s["position_x"], s["position_y"])
+        loc = place(s["map"], s["position_x"], s["position_y"], prefer)
         if loc:
             out.setdefault(loc[0], []).append([loc[1], loc[2]])
+    return out
+
+
+def quest_zones(qids):
+    # the zones the quests are sorted under, with their parent zones (spawns are keyed by top-level zone)
+    out = set()
+    for qid in qids:
+        z = Q[qid].get("QuestSortID") or 0
+        while z > 0 and z not in out:
+            out.add(z)
+            z = zones.area_parent.get(z, 0)
     return out
 
 
@@ -205,7 +239,7 @@ for qid in new:
         objectives = [creature_obj or None, object_obj or None, item_obj or None, rep, killcredit or None]
     trigger = None
     for t in q.get("areatriggers") or []:
-        loc = zones.locate(t["map"], t["x"], t["y"])
+        loc = place(t["map"], t["x"], t["y"], quest_zones([qid]))
         if loc:
             trigger = [clean(q.get("ObjectiveText1")) or q["LogTitle"], {loc[0]: [[loc[1], loc[2]]]}]
             break
@@ -270,6 +304,28 @@ for qid, q in Q.items():
     for e in oe: ends_o[e].add(qid)
 new_or_changed = set(new) | set(changed)
 
+# the quests each NPC / object belongs to (gives, takes, is an objective of, drops a quest item for): a spawn on a
+# zone border goes in those quests' zone, so e.g. the Rebel Camp stays on the Stranglethorn map, not Duskwood's.
+# Only quest items (class 12) count as drops: cloth that some far-away quest wants says nothing about the mob's zone.
+npc_quests, obj_quests = collections.defaultdict(set), collections.defaultdict(set)
+for qid, q in Q.items():
+    cs, os_, _ = starters(q)
+    ce, oe = enders(q)
+    for e in cs | ce: npc_quests[e].add(qid)
+    for e in os_ | oe: obj_quests[e].add(qid)
+    for i in range(1, 5):
+        oid = q.get("RequiredNpcOrGo%d" % i, 0)
+        if oid > 0:
+            npc_quests[oid].add(qid)
+            for e in C.get(oid, {}).get("killcredit_sources") or []: npc_quests[e].add(qid)
+        elif oid < 0:
+            obj_quests[-oid].add(qid)
+    for i in range(1, 7):
+        iid = q.get("RequiredItemId%d" % i, 0)
+        if not iid or I.get(iid, {}).get("class") != 12:
+            continue
+        for e in npc_drops.get(iid, ()): npc_quests[e].add(qid)
+        for e in obj_drops.get(iid, ()): obj_quests[e].add(qid)
 
 npc_out, obj_out, item_out = {}, {}, {}
 for e in sorted(need_npc):
@@ -281,7 +337,7 @@ for e in sorted(need_npc):
         if gives & new_or_changed:
             npc_out[e] = {10: sorted(starts_n.get(e, ())) or None, 11: sorted(ends_n.get(e, ())) or None}
         continue
-    sp = spawns(c.get("spawns") or [])
+    sp = spawns(c.get("spawns") or [], quest_zones(npc_quests.get(e, ())))
     npc_out[e] = {1: c["name"], 2: 0, 3: 0, 4: c["minlevel"], 5: c["maxlevel"], 6: c["rank"],
                   7: sp or None, 9: main_zone(sp),
                   10: sorted(starts_n.get(e, ())) or None, 11: sorted(ends_n.get(e, ())) or None,
@@ -295,7 +351,7 @@ for e in sorted(need_obj):
         if gives & new_or_changed:
             obj_out[e] = {2: sorted(starts_o.get(e, ())) or None, 3: sorted(ends_o.get(e, ())) or None}
         continue
-    sp = spawns(g.get("spawns") or [])
+    sp = spawns(g.get("spawns") or [], quest_zones(obj_quests.get(e, ())))
     obj_out[e] = {1: g["name"], 2: sorted(starts_o.get(e, ())) or None, 3: sorted(ends_o.get(e, ())) or None,
                   4: sp or None, 5: main_zone(sp)}
 related = collections.defaultdict(set)
@@ -418,5 +474,6 @@ print("npcs: %d (%d new full, %d giver/turn-in lists)" % (len(npc_out), sum(1 fo
 print("objects: %d (%d new full)" % (len(obj_out), sum(1 for v in obj_out.values() if 1 in v)))
 print("items: %d (%d new full)" % (len(item_out), sum(1 for v in item_out.values() if 1 in v)))
 print("new NPCs without open-world spawns: %d" % sum(1 for v in npc_out.values() if 1 in v and not v.get(7)))
+print("border positions put in their quest's zone instead of a neighbour's: %d" % moved_to_quest_zone)
 print("quests also in the Ascension plugin (its fields win): %d" % len(asc_overlap))
 print("files: %s" % ", ".join(files))

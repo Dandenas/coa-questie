@@ -256,8 +256,12 @@ monster = function(npcId, objective)
                     or dataSourceMode == "learner"
                     or hasReliableLearnedSpawns
                     or not staticHasSpawns
+                -- CoA fix: a quest giver's position learned from a mouseover, target or quest window is where the
+                -- player stood (spawnSource "fallback"), so it is left out when there are database spawns (see
+                -- SpawnsToAdd in QuestieLearner.lua).
+                local onlyGuesses = learnedNpc.spawnSource == "fallback" and staticHasSpawns and dataSourceMode ~= "learner"
                 if learnedSpawns and next(learnedSpawns) and learnedNpc.mc and learnedNpc.mc >= threshold
-                        and canUseLearnerSpawns and not ascProtected then
+                        and canUseLearnerSpawns and not ascProtected and not onlyGuesses then
                     Questie:Debug(Questie.DEBUG_DEVELOP, "[monster] Preferring learned spawns for NPC:", npcId, "(mc=" .. tostring(learnedNpc.mc) .. ")")
                     spawns = dataSourceMode == "learner" and learnedSpawns or _AddLearnedSpawns(spawns, learnedSpawns)
                     isLearned = true

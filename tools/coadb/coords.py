@@ -1,7 +1,8 @@
 """World position (map, x, y) -> (zone areaId, map %x, map %y), from the client's WorldMapArea.dbc.
 
 Questie stores spawns per top-level zone in the zone's world-map percentages. A point can sit inside
-several zone rectangles (they overlap at borders); the zone where it is furthest inside wins.
+several zone rectangles (they overlap at borders); a zone the caller prefers wins (the zone of the spawn's
+own quests, as Questie's stock data does at the Rebel Camp), otherwise the zone where it is furthest inside.
 """
 import glob, os, struct, sys
 
@@ -49,14 +50,14 @@ class Zones:
                 continue  # sub-zones/caves: Questie keys spawns by the top-level zone
             self.rects.setdefault(mapid, []).append((area, left, right, top, bottom))
 
-    def locate(self, mapid, wx, wy):
+    def locate(self, mapid, wx, wy, prefer=()):
         best, best_score = None, None
         for area, left, right, top, bottom in self.rects.get(mapid, ()):
             if not (right <= wy <= left and bottom <= wx <= top):
                 continue
             px = (left - wy) / (left - right)
             py = (top - wx) / (top - bottom)
-            score = min(px, 1 - px, py, 1 - py)  # how far inside, as a fraction of the map
+            score = (area in prefer, min(px, 1 - px, py, 1 - py))  # preferred first, then how far inside
             if best_score is None or score > best_score:
                 best, best_score = (area, round(px * 100, 2), round(py * 100, 2)), score
         return best
