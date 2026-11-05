@@ -290,7 +290,8 @@ function QuestieOptions.tabs.database:Initialize()
                         if v == "learner" then
                             Questie.dbLearner.global.settings.enabled = true
                         end
-                        ApplyLearnerMode()
+                        -- CoA fix: a mode only applies cleanly from a fresh load (see ApplyDataSourceMode)
+                        StaticPopup_Show("QUESTIE_RELOAD")
                     end
                 end,
             },

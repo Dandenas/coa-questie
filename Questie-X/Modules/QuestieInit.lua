@@ -407,6 +407,11 @@ QuestieInit.Stages[3] = function() -- run as a coroutine
         QuestieDB:Initialize()
     end
 
+    -- CoA fix: the plugins' data is in now, so the Learner can name each quest's item objectives
+    if QuestieLearner and QuestieLearner.OnPluginDataLoaded then
+        QuestieLearner:OnPluginDataLoaded()
+    end
+
     -- register events that rely on questie being initialized
     QuestieEventHandler:RegisterLateEvents()
 

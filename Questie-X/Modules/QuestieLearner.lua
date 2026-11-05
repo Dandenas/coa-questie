@@ -468,6 +468,106 @@ local function SpawnsToAdd(record, learnedSpawns, spawnList)
     return learnedSpawns
 end
 
+-- CoA fix: this client doesn't say what a loot window belongs to, so drops are credited to the current target, often the
+-- next mob by then. Those lists replaced the database's (the DB handle hands out an override's field as it is), so an
+-- item's pins moved to whatever was targeted. Learned drops are still recorded, but only used for items the database
+-- has no drops for. Learner Only keeps using them.
+local function UsesLearnedDrops(itemId)
+    if GetDataSourceMode() == "learner" then return true end
+    local ovr = QuestieDB.itemDataOverrides and QuestieDB.itemDataOverrides[itemId]
+    local record = Questie.dbLearner.global.items[itemId]
+    if ovr and record and ovr[2] and ovr[2] == record[2] then return true end -- already the learner's own list
+    if type(QuestieDB.QueryItemSingle) ~= "function" then return false end
+    for _, key in ipairs({ "npcDrops", "objectDrops" }) do
+        local drops = QuestieDB.QueryItemSingle(itemId, key)
+        if type(drops) == "table" and next(drops) then return false end
+    end
+    return true
+end
+
+-- An item override made from a learned record: a copy, because plugins write into overrides.
+local function ItemOverrideFrom(record, itemId)
+    local copy = CopyWithoutField(record, 2)
+    copy[3] = nil
+    if UsesLearnedDrops(itemId) then
+        copy[2], copy[3] = record[2], record[3]
+    end
+    return copy
+end
+
+-- CoA fix: quest log objectives are paired with a quest's objective list by position, creatures first, so a drop NPC
+-- added as a creature objective moved every objective along by one. The item's drop list already gives it pins; only
+-- Learner Only still links them.
+local function LinksDropsToQuests()
+    return GetDataSourceMode() == "learner"
+end
+
+-- CoA fix: an item objective goes up when the item is looted, often after the next mob has died, so the last kill says
+-- nothing about where it dropped. Saving that kill at the objective's position replaced the item with that mob: spider
+-- meat became a condor objective. Kills are now only tied to item objectives on quests with no known item objectives.
+local function IsKnownItemObjective(questId, objType)
+    if objType ~= "item" or GetDataSourceMode() == "learner" then return false end
+    local quest = QuestieDB.GetQuest and QuestieDB.GetQuest(questId)
+    if quest and quest.ObjectiveData then
+        for _, data in pairs(quest.ObjectiveData) do
+            if data.Type == "item" then return true end
+        end
+    end
+    return false
+end
+
+-- CoA fix: clears what those two saved before they were fixed: objective mappings named after one of the quest's items,
+-- and text-less creature objectives that are only a learned drop of one of its items. Real kill objectives stay.
+local function ForgetItemObjectiveMobs(questId, qData, learnedItems)
+    if type(QuestieDB.QueryItemSingle) ~= "function" then return end
+    local slots = type(qData[10]) == "table" and qData[10] or nil
+    local creatures = slots and type(slots[1]) == "table" and slots[1] or nil
+    if not creatures and type(qData.objIndex) ~= "table" then return end
+
+    local itemNames, dropNpcs = {}, {}
+    local function AddItems(list)
+        if type(list) ~= "table" then return end
+        for _, entry in pairs(list) do
+            local itemId = type(entry) == "table" and entry[1] or entry
+            if type(itemId) == "number" then
+                local record = learnedItems[itemId]
+                local dbName = QuestieDB.QueryItemSingle(itemId, "name")
+                if type(dbName) == "string" then itemNames[string.lower(dbName)] = true end
+                if record and type(record[1]) == "string" then itemNames[string.lower(record[1])] = true end
+                if record and type(record[2]) == "table" then
+                    for _, npcId in ipairs(record[2]) do dropNpcs[npcId] = true end
+                end
+            end
+        end
+    end
+    local dbObjectives = type(QuestieDB.QueryQuestSingle) == "function" and QuestieDB.QueryQuestSingle(questId, "objectives")
+    AddItems(type(dbObjectives) == "table" and dbObjectives[3])
+    AddItems(slots and slots[3])
+
+    if type(qData.objIndex) == "table" then
+        for index, entry in pairs(qData.objIndex) do
+            if type(entry) == "table" and entry.type ~= "object" and type(entry.text) == "string"
+                    and itemNames[string.lower(entry.text)] then
+                qData.objIndex[index] = nil
+            end
+        end
+        if not next(qData.objIndex) then qData.objIndex = nil end
+    end
+    if creatures then
+        for i = #creatures, 1, -1 do
+            local entry = creatures[i]
+            if type(entry) == "table" then
+                local text = entry[2]
+                if (type(text) == "string" and itemNames[string.lower(text)])
+                        or ((text == nil or text == "") and dropNpcs[entry[1]]) then
+                    table.remove(creatures, i)
+                end
+            end
+        end
+        if not next(creatures) then slots[1] = nil end
+    end
+end
+
 local function CountUniqueSpawnPositions(spawns)
     if type(spawns) ~= "table" then return 0 end
 
@@ -654,7 +754,12 @@ function QuestieLearner:ApplyDataSourceMode()
         settings.enabled = true
     end
     CaptureStaticOverrideSnapshot()
-    RestoreStaticOverridesForMode()
+    -- CoA fix: the snapshot is from Stage 1, before the database plugins load, and their data lives in these same
+    -- overrides. Restoring it later wiped every stock item, NPC, object and quest until a /reload, from any learner
+    -- setting. Mode changes now ask for a reload instead.
+    if not _Learner.pluginDataLoaded then
+        RestoreStaticOverridesForMode()
+    end
     self:InjectLearnedData()
     -- Rebuild every per-entity cache (including the per-zone quest cache) so the
     -- mode switch takes effect immediately for reads, pins, and zone lookups.
@@ -1244,7 +1349,7 @@ local function CrossLinkAfterNPC(npcId)
 
         -- Item objective drop chain: quest[10][3] lists items; if any item's
         -- drop list (item[2]) includes this NPC, mark NPC as creature source.
-        if qData[10] and qData[10][3] then
+        if LinksDropsToQuests() and qData[10] and qData[10][3] then
             for _, entry in ipairs(qData[10][3]) do
                 local itemId = entry[1]
                 local iData = learned.items[itemId]
@@ -1338,7 +1443,8 @@ local function CrossLinkAfterQuest(questId)
                     end
                     if not ovr[5] then ovr[5] = questId end
                     for k, v in pairs(iData) do
-                        if k ~= 1 and k ~= 5 and k ~= "mc" and ovr[k] == nil and not IsAscensionProtected("ITEM", qData[11], k) then
+                        if k ~= 1 and k ~= 5 and k ~= "mc" and ovr[k] == nil and (UsesLearnedDrops(qData[11]) or (k ~= 2 and k ~= 3))
+                                and not IsAscensionProtected("ITEM", qData[11], k) then
                             ovr[k] = v
                         end
                     end
@@ -1354,8 +1460,10 @@ local function CrossLinkAfterQuest(questId)
             local iData = learned.items[itemId]
             if iData and iData[2] then
                 iData.questRelevant = true
-                for _, dropNpcId in ipairs(iData[2]) do
-                    _AddToQuestObjective(qData, 1, dropNpcId, nil, qOvr, questId)
+                if LinksDropsToQuests() then
+                    for _, dropNpcId in ipairs(iData[2]) do
+                        _AddToQuestObjective(qData, 1, dropNpcId, nil, qOvr, questId)
+                    end
                 end
             end
         end
@@ -1444,7 +1552,9 @@ local function CrossLinkAfterItem(itemId)
             for _, entry in ipairs(qData[10][3]) do
                 if entry[1] == itemId and iData[2] then
                     for _, dropNpcId in ipairs(iData[2]) do
-                        _AddToQuestObjective(qData, 1, dropNpcId, nil, qOvr, questId)
+                        if LinksDropsToQuests() then
+                            _AddToQuestObjective(qData, 1, dropNpcId, nil, qOvr, questId)
+                        end
                         activeRefs[questId] = true
                     end
                 end
@@ -2536,10 +2646,11 @@ function QuestieLearner:LearnItem(itemId, name, itemLevel, requiredLevel, itemCl
     if self:IsLearnerLiveEnabled() and QuestieDB and QuestieDB.itemDataOverrides then
         local ovr = QuestieDB.itemDataOverrides[itemId]
         if not ovr then
-            QuestieDB.itemDataOverrides[itemId] = existing
+            QuestieDB.itemDataOverrides[itemId] = ItemOverrideFrom(existing, itemId)
         else
+            local useDrops = UsesLearnedDrops(itemId)
             for k, v in pairs(existing) do
-                if ovr[k] == nil and not IsAscensionProtected("ITEM", itemId, k) then ovr[k] = v end
+                if ovr[k] == nil and (useDrops or (k ~= 2 and k ~= 3)) and not IsAscensionProtected("ITEM", itemId, k) then ovr[k] = v end
             end
         end
         if QuestieDB.private and QuestieDB.private.itemCache then
@@ -2576,10 +2687,10 @@ function QuestieLearner:LearnItemDrop(itemId, npcId)
     table.insert(existing[2], npcId)
 
     -- Live injection: sync drop list to itemDataOverrides
-    if self:IsLearnerLiveEnabled() and QuestieDB and QuestieDB.itemDataOverrides and not IsAscensionProtected("ITEM", itemId, 2) then
+    if self:IsLearnerLiveEnabled() and QuestieDB and QuestieDB.itemDataOverrides and not IsAscensionProtected("ITEM", itemId, 2) and UsesLearnedDrops(itemId) then
         local ovr = QuestieDB.itemDataOverrides[itemId] or {}
         QuestieDB.itemDataOverrides[itemId] = ovr
-        ovr[2] = ovr[2] or {}
+        ovr[2] = ovr[2] or existing[2]
         local found = false
         for _, id in ipairs(ovr[2]) do
             if id == npcId then found = true; break end
@@ -2727,6 +2838,30 @@ function QuestieLearner:Sanitize(data)
     end
 
     return data
+end
+
+-- CoA fix: InjectLearnedData first runs in Stage 1, before the database plugins have loaded, when stock items can't be
+-- looked up yet. Stage 3 calls this once their data is in, so a quest's item objectives can be named.
+-- CoA fix: Stage 3 calls this once the database plugins' data is in.
+function QuestieLearner:OnPluginDataLoaded()
+    _Learner.pluginDataLoaded = true
+    self:ForgetLearnedItemObjectiveMobs()
+end
+
+function QuestieLearner:ForgetLearnedItemObjectiveMobs()
+    if not EnsureLearnedData() or GetDataSourceMode() ~= "auto" then return end
+    local learned = Questie.dbLearner.global
+    for questId, data in pairs(learned.quests) do
+        local id = tonumber(questId) or questId
+        ForgetItemObjectiveMobs(id, data, learned.items)
+        local ovr = QuestieDB.questDataOverrides and QuestieDB.questDataOverrides[id]
+        if ovr and ovr ~= data then
+            ForgetItemObjectiveMobs(id, ovr, learned.items)
+        end
+        if QuestieDB.private and QuestieDB.private.questCache then
+            QuestieDB.private.questCache[id] = nil
+        end
+    end
 end
 
 function QuestieLearner:InjectLearnedData()
@@ -3189,6 +3324,12 @@ function QuestieLearner:InjectLearnedData()
         Questie:Debug(Questie.DEBUG_INFO, "[QuestieLearner] Inferred sortKey for", sortKeysInferred, "quests from zone data")
     end
 
+    if mode ~= "learner" then
+        for questId, data in pairs(learned.quests) do
+            ForgetItemObjectiveMobs(tonumber(questId) or questId, data, learned.items)
+        end
+    end
+
     -- 2. Quests
     local questIdsToFix = {}
     for questId, data in pairs(learned.quests) do
@@ -3256,7 +3397,7 @@ function QuestieLearner:InjectLearnedData()
         end
         if HasQuestReferences(iid or itemId) then
             if not QuestieDB.itemDataOverrides[iid or itemId] then
-                QuestieDB.itemDataOverrides[iid or itemId] = data
+                QuestieDB.itemDataOverrides[iid or itemId] = ItemOverrideFrom(data, iid or itemId)
                 itemCount = itemCount + 1
             end
         end
@@ -3356,6 +3497,7 @@ function QuestieLearner:ClearAllData()
     self:ApplyDataSourceMode()
     NotifyLearnerOptionsChanged()
     Questie:Print("Cleared all learned data.")
+    StaticPopup_Show("QUESTIE_RELOAD") -- CoA fix: what was already applied stays until a reload
 end
 
 function QuestieLearner:SerializeTable(t)
@@ -4099,7 +4241,7 @@ function QuestieLearner:OnLootOpened()
     local targetId, targetType = nil, nil
     local npcId = nil
     local objectId = nil
-    if targetGuid then
+    if targetGuid and UnitIsDead("target") then -- CoA fix: a living target is never what is being looted
         targetId, targetType = self:ResolveNpcIdFromGuidAndName(targetGuid, UnitName("target"))
         TraceLearnerEntity("loot_target", targetGuid, targetType, targetId, UnitName("target"))
         if targetType == "Creature" or targetType == "Vehicle" then
@@ -4886,7 +5028,7 @@ function QuestieLearner:OnQuestLogUpdate()
                                 end
                             end
                         end
-                        if bestKill and bestKill.npcId then
+                        if bestKill and bestKill.npcId and not IsKnownItemObjective(questId, objType) then
                             local cleanText = objText:match("^(.-)%s*:") or (bestKill.name or "")
                             Questie:Debug(Questie.DEBUG_LEARNER,
                                 "[QuestieLearner] Quest", questId, "obj", j,

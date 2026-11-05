@@ -8,8 +8,11 @@ local worldMapData = QuestieCompat.worldMapData -- table { width, height, left, 
 -- for maps not present in Questie's UiMapData (e.g., custom Ascension maps).
 local RealHBD
 
--- Try to load the real HBD library under several known names, and if that fails,
--- scan the global environment for any table that looks like an HBD library (has .mapData).
+-- Try to load the real HBD library under several known names.
+-- CoA fix: LibStub only. This also scanned every global table and took the first one with a mapData
+-- field. Astrolabe's global WorldMapSize (shipped with Zygor) answers every key with a table of zero
+-- sizes, so it matched: the tracker crashed, the bounds override below could write into it, and with
+-- no match at all the scan reran on every miss.
 local function LoadRealHBD()
     -- Common library identifiers
     for _, name in ipairs({"HereBeDragonsQuestie-2.0", "HereBeDragons-2.0", "HereBeDragons"}) do
@@ -18,22 +21,9 @@ local function LoadRealHBD()
             return lib
         end
     end
-    -- Fallback: brute-force global scan for a table with a mapData field
-    -- Use pcall protection because Ascension's client may have protected globals.
-    local ok, _ = pcall(function()
-        for _, v in pairs(_G) do
-            if type(v) == "table" and v.mapData and type(v.mapData) == "table" then
-                RealHBD = v
-                error("_found")  -- break out of pcall early
-            end
-        end
-    end)
-    -- RealHBD was set inside the pcall if found; otherwise stays nil
-    return RealHBD
 end
 
 -- Eager attempt at load; will also lazy-load on first use.
--- Wrap in pcall so HBD.lua doesn't fail to load if the global scan hits a protected table.
 pcall(function()
     RealHBD = LoadRealHBD()
 end)
@@ -140,6 +130,13 @@ f:SetScript("OnEvent", function(self, event)
     self:UnregisterEvent(event)
 end)
 
+-- CoA fix: usable map bounds are four numbers with a real size. Anything else counts as no data.
+local function HasBounds(data)
+    return data and type(data[1]) == "number" and type(data[2]) == "number"
+        and type(data[3]) == "number" and type(data[4]) == "number"
+        and data[1] ~= 0 and data[2] ~= 0
+end
+
 --- Convert local/point coordinates to world coordinates in yards
 --- @param x X position in 0-1 point coordinates
 --- @param y Y position in 0-1 point coordinates
@@ -150,7 +147,7 @@ function HBD:GetWorldCoordinatesFromZone(x, y, zone)
     -- Sunstrider coordinate space. Both convert through their own bounds —
     -- no redirect needed here because _ResolveMapUiMapId passes 1241 through.
     local data = mapData[zone]
-    if not data or data[1] == 0 or data[2] == 0 then
+    if not HasBounds(data) then
         -- Attempt to lazy-load the real HBD if we haven't yet
         if not RealHBD then
             pcall(function() RealHBD = LoadRealHBD() end)
@@ -158,7 +155,7 @@ function HBD:GetWorldCoordinatesFromZone(x, y, zone)
         if RealHBD and RealHBD.mapData then
             data = RealHBD.mapData[zone]
         end
-        if not data or data[1] == 0 or data[2] == 0 then
+        if not HasBounds(data) then
             return nil, nil, nil
         end
     end
@@ -180,14 +177,14 @@ function HBD:GetZoneCoordinatesFromWorld(x, y, zone, allowOutOfBounds)
     -- mapData[1241] has its own calibrated bounds matching the engine's space.
     -- No redirect needed — callers pass the correct zone directly.
     local data = mapData[zone]
-    if not data or data[1] == 0 or data[2] == 0 then
+    if not HasBounds(data) then
         if not RealHBD then
             pcall(function() RealHBD = LoadRealHBD() end)
         end
         if RealHBD and RealHBD.mapData then
             data = RealHBD.mapData[zone]
         end
-        if not data or data[1] == 0 or data[2] == 0 then
+        if not HasBounds(data) then
             return nil, nil
         end
     end
@@ -906,6 +903,15 @@ pins.UpdateWorldMap = UpdateWorldMap
 
 local last_update = 0
 local function OnUpdateHandler(frame, elapsed)
+    -- CoA fix: pins are placed from the map's size when they were drawn, and only redrawn on events, so an addon
+    -- resizing the map after that left them off-mark until the next redraw. Redraw as soon as the size differs.
+    if WorldMapFrame:IsVisible() then
+        local scale = WorldMapButton:GetScale()
+        if WorldMapButton:GetWidth()*scale ~= worldmapWidth or WorldMapButton:GetHeight()*scale ~= worldmapHeight then
+            UpdateWorldMap()
+        end
+    end
+
     last_update = last_update + elapsed
     if last_update > 1 or queueFullUpdate then
         UpdateMinimapPins(queueFullUpdate)
